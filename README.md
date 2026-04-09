@@ -106,11 +106,7 @@ Build a standalone executable locally:
 
 ### Setting Up Sensors
 
-1. **Start HWiNFO** with "Sensors-only" mode
-2. **Enable Shared Memory** in HWiNFO Settings
-3. Launch ThermalEngine - it will automatically detect HWiNFO
-
-ThermalEngine and HWiNFO can start in any order - sensors will connect automatically when both are running.
+ThermalEngine  - sensors will connect automatically when both are running.
 
 Go to **Display > Diagnose Sensors** to verify sensor connection.
 
@@ -161,12 +157,6 @@ Go to **Display > Diagnose Sensors** to verify sensor connection.
 - Check USB connection
 - Restart the editor
 
-### Sensors showing 0 or not working
-1. **Check HWiNFO is running** - ThermalEngine requires HWiNFO for sensor data
-2. **Enable Shared Memory** in HWiNFO Settings
-3. Go to **Display > Diagnose Sensors** to check connection status
-4. Sensors will auto-connect when HWiNFO becomes available
-
 ### Low FPS / Performance issues
 - Reduce target FPS (10 FPS is usually sufficient)
 - Avoid video backgrounds on older machines
@@ -207,7 +197,6 @@ MIT License - See LICENSE file for details.
 
 ## Credits
 
-- [HWiNFO](https://www.hwinfo.com/) - Hardware sensor data provider
 - [PySide6](https://www.qt.io/qt-for-python) - Qt GUI framework
 - [Pillow](https://pillow.readthedocs.io/) - Image processing
 
