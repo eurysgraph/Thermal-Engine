@@ -8,7 +8,6 @@ import json
 import time
 import io
 import threading
-import psutil
 
 # Windows-specific imports for power event handling
 if sys.platform == 'win32':
@@ -23,7 +22,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QPlainTextEdit
 )
 from PySide6.QtCore import Qt, QTimer, QByteArray, Signal, QObject
-from PySide6.QtGui import QColor, QAction, QKeySequence, QIcon, QTextCursor, QFont
+from PySide6.QtGui import QColor, QAction, QKeySequence, QIcon, QTextCursor, QFont, QIntValidator
 
 
 class ConsoleOutputStream(QObject):
@@ -123,133 +122,20 @@ _gradient_cache = {}
 _gradient_cache_max_size = 20  # Reduced from 50 to save memory
 
 
-# Background psutil data collection
-_psutil_data = {
-    'cpu_percent': 0,
-    'ram_percent': 0,
-    'ram_used': 0,
-    'ram_available': 0,
-    'net_upload': 0,
-    'net_download': 0,
-}
-_psutil_data_lock = threading.Lock()
-_psutil_thread = None
-_psutil_thread_running = False
 _cpu_percent_history = []
 _last_net_io = None
 _last_net_time = 0
-_psutil_last_success = 0
-_psutil_consecutive_errors = 0
 
-
-def _psutil_polling_thread():
-    """Background thread that continuously polls psutil data."""
-    global _psutil_data, _psutil_thread_running, _cpu_percent_history
-    global _last_net_io, _last_net_time, _psutil_last_success, _psutil_consecutive_errors
-
-    # Initialize CPU percent
-    try:
-        psutil.cpu_percent(interval=None)
-    except:
-        pass
-
-    while _psutil_thread_running:
-        try:
-            # CPU (smoothed)
-            raw_cpu = psutil.cpu_percent(interval=None)
-            _cpu_percent_history.append(raw_cpu)
-            if len(_cpu_percent_history) > 5:
-                _cpu_percent_history.pop(0)
-            smoothed_cpu = sum(_cpu_percent_history) / len(_cpu_percent_history)
-
-            # RAM
-            ram = psutil.virtual_memory()
-
-            # Network
-            net_upload = 0
-            net_download = 0
-            try:
-                net_io = psutil.net_io_counters()
-                current_time = time.time()
-                if _last_net_io and _last_net_time:
-                    time_delta = current_time - _last_net_time
-                    if time_delta > 0:
-                        bytes_sent = net_io.bytes_sent - _last_net_io.bytes_sent
-                        bytes_recv = net_io.bytes_recv - _last_net_io.bytes_recv
-                        net_upload = (bytes_sent / time_delta) / (1024 * 1024)
-                        net_download = (bytes_recv / time_delta) / (1024 * 1024)
-                _last_net_io = net_io
-                _last_net_time = current_time
-            except:
-                pass
-
-            # Update shared data
-            with _psutil_data_lock:
-                _psutil_data['cpu_percent'] = round(smoothed_cpu, 1)
-                _psutil_data['ram_percent'] = ram.percent
-                _psutil_data['ram_used'] = round(ram.used / (1024**3), 1)
-                _psutil_data['ram_available'] = round(ram.available / (1024**3), 1)
-                _psutil_data['net_upload'] = round(net_upload, 2)
-                _psutil_data['net_download'] = round(net_download, 2)
-
-            _psutil_last_success = time.time()
-            _psutil_consecutive_errors = 0
-
-        except Exception as e:
-            _psutil_consecutive_errors += 1
-            if _psutil_consecutive_errors <= 3:  # Only log first few errors
-                print(f"[Psutil] Background poll error: {e}")
-            # Reset state on repeated errors (might help after sleep/wake)
-            if _psutil_consecutive_errors > 10:
-                _cpu_percent_history.clear()
-                _psutil_consecutive_errors = 0
-                try:
-                    psutil.cpu_percent(interval=None)  # Re-initialize
-                except:
-                    pass
-
-        # Poll every 500ms - balances responsiveness with CPU usage
-        time.sleep(0.5)
-
-
-def start_psutil_thread():
-    """Start the background psutil polling thread."""
-    global _psutil_thread, _psutil_thread_running
-    if _psutil_thread is None or not _psutil_thread.is_alive():
-        _psutil_thread_running = True
-        _psutil_thread = threading.Thread(target=_psutil_polling_thread, daemon=True)
-        _psutil_thread.start()
-        print("[Psutil] Background polling thread started")
-
-
-def stop_psutil_thread():
-    """Stop the background psutil polling thread."""
-    global _psutil_thread_running, _psutil_thread
-    _psutil_thread_running = False
-    if _psutil_thread and _psutil_thread.is_alive():
-        _psutil_thread.join(timeout=1.0)
-    _psutil_thread = None
-
-
-def get_psutil_data():
-    """Get psutil data from background thread cache (non-blocking)."""
-    # Check if thread is alive, restart if needed
-    global _psutil_thread
-    if _psutil_thread_running and (_psutil_thread is None or not _psutil_thread.is_alive()):
-        print("[Psutil] Thread died, restarting...")
-        _psutil_thread = threading.Thread(target=_psutil_polling_thread, daemon=True)
-        _psutil_thread.start()
-
-    with _psutil_data_lock:
-        return _psutil_data.copy()
 
 try:
-    import hid
+    import hid # O la librería que estés usando para la conexión USB
     HAS_HID = True
 except ImportError:
     HAS_HID = False
+    print("[Error] Librería 'hid' no encontrada. Las funciones USB estarán deshabilitadas.")
 
 from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, SOURCE_UNITS
+from sensors import get_cached_sensors, stop_sensors # <-- IMPORTANTE
 
 
 def get_value_with_unit(value, source, temp_hide_unit=False):
@@ -263,19 +149,21 @@ def get_value_with_unit(value, source, temp_hide_unit=False):
     elif unit_type == "temp":
         # Option to show only ° instead of °C
         if temp_hide_unit:
-            return f"{value:.0f}°"
+            return f"{value:.0f}"
         return f"{value:.0f}{symbol}"
     elif unit_type == "power":
         return f"{value:.0f}{symbol}"
     elif unit_type == "size":
-        return f"{value:.1f}{symbol}"
+        return f"{value:.0f}{symbol}"
     elif unit_type == "speed":
+        return f"{value:.0f}{symbol}"
+    elif unit_type == "net_speed":
         return f"{value:.1f}{symbol}"
     else:  # percent
         return f"{value:.0f}{symbol}"
 from element import ThemeElement
 import sensors
-from sensors import init_sensors, get_cached_sensors, get_sensors_sync, stop_sensors
+from sensors import get_cached_sensors, stop_sensors
 import settings
 from app_path import get_resource_path, get_bundled_resource_path
 
@@ -312,7 +200,6 @@ class ThemeEditorWindow(QMainWindow):
         self.frame_times = []
         self.last_frame_time = 0
         self.perf_update_timer = None
-        self.process = psutil.Process()
 
         # Undo/Redo stacks
         self.undo_stack = []
@@ -338,9 +225,6 @@ class ThemeEditorWindow(QMainWindow):
         self._was_connected_before_sleep = False
         self._last_wake_time = 0
 
-        # Start background threads for sensor data
-        start_psutil_thread()
-
         self.setup_ui()
         self.setup_console()
         self.setup_menu()
@@ -354,6 +238,11 @@ class ThemeEditorWindow(QMainWindow):
 
         # Auto-connect to display after window is shown
         QTimer.singleShot(500, self.auto_connect)
+
+    def cleanup(self):
+        """Asegúrate de detener el hilo de LHM al cerrar."""
+        global _lhm_thread_running
+        _lhm_thread_running = False
 
     def auto_connect(self):
         """Attempt to connect to display automatically on startup."""
@@ -494,7 +383,7 @@ class ThemeEditorWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left panel with tabs for Elements and Presets
+        # Left panel with tabs for Elements and Presets 
         left_panel = QTabWidget()
         left_panel.setMaximumWidth(340)
 
@@ -503,6 +392,37 @@ class ThemeEditorWindow(QMainWindow):
 
         self.presets_panel = PresetsPanel()
         left_panel.addTab(self.presets_panel, "Presets")
+
+        # --- NUEVA PESTAÑA DE SETTINGS ---
+        settings_tab = QWidget()
+        settings_layout = QVBoxLayout(settings_tab)
+        
+        thermal_group = QGroupBox("Thermal Limits")
+        thermal_form = QFormLayout()
+
+        # Input CPU
+        self.cpu_limit_edit = QLineEdit()
+        self.cpu_limit_edit.setPlaceholderText("75")
+        self.cpu_limit_edit.setValidator(QIntValidator(40, 110)) # Solo números entre 40 y 110
+        self.cpu_limit_edit.setText(str(settings.get_setting("cpu_temp_limit", 75)))
+        self.cpu_limit_edit.textChanged.connect(self.save_thermal_settings)
+
+        # Input GPU
+        self.gpu_limit_edit = QLineEdit()
+        self.gpu_limit_edit.setPlaceholderText("80")
+        self.gpu_limit_edit.setValidator(QIntValidator(40, 110))
+        self.gpu_limit_edit.setText(str(settings.get_setting("gpu_temp_limit", 80)))
+        self.gpu_limit_edit.textChanged.connect(self.save_thermal_settings)
+
+        thermal_form.addRow("CPU Limit (°C):", self.cpu_limit_edit)
+        thermal_form.addRow("GPU Limit (°C):", self.gpu_limit_edit)
+        thermal_group.setLayout(thermal_form)
+        
+        settings_layout.addWidget(thermal_group)
+        settings_layout.addStretch() # Empuja todo hacia arriba
+        
+        left_panel.addTab(settings_tab, "Settings")
+        # ---------------------------------
 
         splitter.addWidget(left_panel)
 
@@ -1029,6 +949,35 @@ class ThemeEditorWindow(QMainWindow):
             return
         self.save_as_preset()
         self.status_bar.showMessage(f"Saved: {self.theme_name}")
+    
+    def save_thermal_settings(self):
+        """Guarda los límites térmicos en el archivo de configuración."""
+        try:
+            cpu_val = int(self.cpu_limit_edit.text()) if self.cpu_limit_edit.text() else 75
+            gpu_val = int(self.gpu_limit_edit.text()) if self.gpu_limit_edit.text() else 80
+            
+            settings.set_setting("cpu_temp_limit", cpu_val)
+            settings.set_setting("gpu_temp_limit", gpu_val)
+            
+            self.status_bar.showMessage(f"Thermal limits updated: CPU {cpu_val}°C / GPU {gpu_val}°C", 3000)
+        except ValueError:
+            pass
+
+    def process_thermal_alerts(self, data):
+        """Esta función SÍ puede tocar la interfaz (self.perf_indicator)"""
+        import settings 
+        cpu_limit = settings.get_setting("cpu_temp_limit", 75)
+        gpu_limit = settings.get_setting("gpu_temp_limit", 80)
+        
+        cpu_actual = data.get("cpu_temp", 0)
+        gpu_actual = data.get("gpu_temp", 0)
+
+        # Si sobrepasa el límite, cambiamos el color a rojo
+        if cpu_actual >= cpu_limit or gpu_actual >= gpu_limit:
+            self.perf_indicator.setStyleSheet("background-color: #ff4444; border-radius: 4px;") 
+        else:
+            # Color verde normal cuando las temperaturas están bien
+            self.perf_indicator.setStyleSheet("background-color: #44ff44; border-radius: 4px;")
 
     def update_element_list_name(self):
         self.element_list.refresh_list()
@@ -1261,59 +1210,39 @@ class ThemeEditorWindow(QMainWindow):
 
     def get_sensor_data(self):
         """Get sensor data from background threads (non-blocking)."""
-        # Get psutil data from background thread
-        psutil_data = get_psutil_data()
+        raw_data = get_cached_sensors()
+        data = {}
 
-        data = {
-            'static': 50,
-            # CPU
-            'cpu_percent': psutil_data['cpu_percent'],
-            'cpu_temp': 0,
-            'cpu_clock': 0,
-            'cpu_power': 0,
-            # GPU
-            'gpu_percent': 0,
-            'gpu_temp': 0,
-            'gpu_clock': 0,
-            'gpu_memory_percent': 0,
-            'gpu_memory_clock': 0,
-            'gpu_power': 0,
-            # RAM
-            'ram_percent': psutil_data['ram_percent'],
-            'ram_used': psutil_data['ram_used'],
-            'ram_available': psutil_data['ram_available'],
-            # Network
-            'net_upload': psutil_data['net_upload'],
-            'net_download': psutil_data['net_download'],
-        }
+        for key, value in raw_data.items():
+            if value is None:
+                value = 0
+                
+            # --- CORRECCIÓN: Evitamos la lista 'system_fans' porque no es un número ---
+            if key == "system_fans":
+                continue 
+                
+            # Si el sensor es un ventilador, bomba o reloj, lo redondeamos a entero
+            if 'fan' in key or 'pump' in key or 'clock' in key:
+                try:
+                    data[key] = int(round(float(value)))
+                except (ValueError, TypeError):
+                    data[key] = 0
+            else:
+                data[key] = value
 
-        # Get HWiNFO sensor data from background thread (non-blocking)
-        if sensors.HAS_HWINFO:
-            try:
-                hwinfo_data = get_cached_sensors()
-                if hwinfo_data:
-                    # CPU sensors
-                    if hwinfo_data.get('cpu_temp', 0) > 0:
-                        data['cpu_temp'] = hwinfo_data['cpu_temp']
-                    if hwinfo_data.get('cpu_clock', 0) > 0:
-                        data['cpu_clock'] = hwinfo_data['cpu_clock']
-                    if hwinfo_data.get('cpu_power', 0) > 0:
-                        data['cpu_power'] = hwinfo_data['cpu_power']
-                    # GPU sensors
-                    if hwinfo_data.get('gpu_temp', 0) > 0:
-                        data['gpu_temp'] = hwinfo_data['gpu_temp']
-                    if hwinfo_data.get('gpu_percent', 0) > 0:
-                        data['gpu_percent'] = hwinfo_data['gpu_percent']
-                    if hwinfo_data.get('gpu_clock', 0) > 0:
-                        data['gpu_clock'] = hwinfo_data['gpu_clock']
-                    if hwinfo_data.get('gpu_memory_percent', 0) > 0:
-                        data['gpu_memory_percent'] = hwinfo_data['gpu_memory_percent']
-                    if hwinfo_data.get('gpu_memory_clock', 0) > 0:
-                        data['gpu_memory_clock'] = hwinfo_data['gpu_memory_clock']
-                    if hwinfo_data.get('gpu_power', 0) > 0:
-                        data['gpu_power'] = hwinfo_data['gpu_power']
-            except Exception as e:
-                print(f"HWiNFO sensor read error: {e}")
+        # Le añadimos la llave 'static' por compatibilidad
+        data['static'] = 50
+
+        # Desempaquetamos los ventiladores del chasis asegurando que también sean enteros
+        if "system_fans" in raw_data and isinstance(raw_data["system_fans"], list):
+            for i, fan in enumerate(raw_data["system_fans"]):
+                fan_val = fan.get("value", 0)
+                if fan_val is None:
+                    fan_val = 0
+                try:
+                    data[f"sys_fan_{i+1}"] = int(round(float(fan_val)))
+                except (ValueError, TypeError):
+                    data[f"sys_fan_{i+1}"] = 0
 
         return data
 
@@ -1326,37 +1255,6 @@ class ThemeEditorWindow(QMainWindow):
         source = sensors.get_sensor_source_display() if hasattr(sensors, 'get_sensor_source_display') else "Unknown"
         info.append(f"Sensor source: {source}")
         info.append("")
-
-        # HWiNFO status
-        has_hwinfo = getattr(sensors, 'HAS_HWINFO', False)
-        info.append(f"HWiNFO connected: {has_hwinfo}")
-        info.append("")
-
-        if has_hwinfo:
-            info.append("Sensor readings from HWiNFO:")
-            info.append("-" * 40)
-            try:
-                sensor_data = get_sensors_sync()
-                if sensor_data:
-                    for key, value in sensor_data.items():
-                        info.append(f"  {key}: {value}")
-                else:
-                    info.append("  (no data returned)")
-            except Exception as e:
-                info.append(f"  Error: {e}")
-        else:
-            info.append("HWiNFO not connected!")
-            info.append("")
-            info.append("To enable sensor monitoring:")
-            info.append("  1. Download HWiNFO from: https://www.hwinfo.com/")
-            info.append("  2. Install and run HWiNFO")
-            info.append("  3. Go to Settings (gear icon)")
-            info.append("  4. Enable 'Shared Memory Support'")
-            info.append("  5. Click OK and run sensors")
-            info.append("  6. Restart ThermalEngine")
-            info.append("")
-            info.append("HWiNFO provides reliable sensor data without")
-            info.append("driver blocklist issues from Windows Defender.")
 
         info.append("\n" + "-" * 40)
         info.append("Current sensor values:")
@@ -1398,7 +1296,6 @@ class ThemeEditorWindow(QMainWindow):
             self.connect_action.setText("Disconnect")
             self.send_action.setEnabled(True)
 
-            psutil.cpu_percent(interval=None)
 
             self.frame_times = []
             self.last_frame_time = 0
@@ -3360,7 +3257,6 @@ class ThemeEditorWindow(QMainWindow):
 
         # Stop background threads
         self._stop_render_thread()
-        stop_psutil_thread()
         stop_sensors()
         video_background.close()
 

@@ -65,6 +65,9 @@ class ThemeElement:
         self.animate_gauge = kwargs.get("animate_gauge", False)  # Animate value changes
         self.animation_speed = kwargs.get("animation_speed", 0.05)  # Animation interpolation speed (0.02-0.15, lower=smoother)
         self.gauge_rounded_ends = kwargs.get("gauge_rounded_ends", False)  # Circle gauge: pill-shaped arc ends
+        self.thermal_reactive = False      # Activa/Desactiva la reacción
+        self.thermal_color = "#FF0000"     # Color que tomará al calentarse
+        self.thermal_target = "cpu"        # "cpu" o "gpu"
 
         # Gauge label options (separate from value text)
         # Default label size: 24 for gauges, 16 for others

@@ -81,13 +81,15 @@ def get_value_with_unit(value, source, temp_hide_unit=False):
         return f"{value:.0f}{symbol}"
     elif unit_type == "temp":
         if temp_hide_unit:
-            return f"{value:.0f}°"
+            return f"{value:.0f}"
         return f"{value:.0f}{symbol}"
     elif unit_type == "power":
         return f"{value:.0f}{symbol}"
     elif unit_type == "size":
-        return f"{value:.1f}{symbol}"
+        return f"{value:.0f}{symbol}"
     elif unit_type == "speed":
+        return f"{value:.0f}{symbol}"
+    elif unit_type == "net_speed":
         return f"{value:.1f}{symbol}"
     else:  # percent
         return f"{value:.0f}{symbol}"

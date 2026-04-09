@@ -328,6 +328,22 @@ class HWiNFOReader:
         ]
         reading = self.find_reading(patterns, SENSOR_TYPE_POWER)
         return reading['value'] if reading else 0.0
+    
+    def get_cpu_fan(self):
+        """Get CPU fan revolution."""
+        patterns = [
+            'CPU',
+        ]
+        reading = self.find_reading(patterns, SENSOR_TYPE_FAN)
+        return reading['value'] if reading else 0.0
+    
+    def get_aio_pump(self):
+        """Get AIO Pump revolution."""
+        patterns = [
+            'AIO Pump',
+        ]
+        reading = self.find_reading(patterns, SENSOR_TYPE_FAN)
+        return reading['value'] if reading else 0.0
 
     def get_gpu_temp(self):
         """Get GPU temperature."""
@@ -388,6 +404,15 @@ class HWiNFOReader:
         ]
         reading = self.find_reading(patterns, SENSOR_TYPE_POWER)
         return reading['value'] if reading else 0.0
+    
+    def get_gpu_fan(self):
+        """Get GPU fan revolution."""
+        patterns = [
+            'GPU Fan1',
+            'GPU Fan2',
+        ]
+        reading = self.find_reading(patterns, SENSOR_TYPE_FAN)
+        return reading['value'] if reading else 0.0
 
     def get_thermal_sensors(self):
         """
@@ -400,12 +425,15 @@ class HWiNFOReader:
             'cpu_temp': self.get_cpu_temp(),
             'cpu_clock': int(self.get_cpu_clock()),
             'cpu_power': self.get_cpu_power(),
+            'cpu_fan':int(self.get_cpu_fan()),
+            'aio_pump':int(self.get_aio_pump()),
             'gpu_temp': self.get_gpu_temp(),
             'gpu_percent': self.get_gpu_usage(),
             'gpu_clock': int(self.get_gpu_clock()),
             'gpu_memory_clock': int(self.get_gpu_memory_clock()),
             'gpu_memory_percent': self.get_gpu_memory_usage(),
             'gpu_power': self.get_gpu_power(),
+            'gpu_fan':  int(self.get_gpu_fan()),
         }
 
 

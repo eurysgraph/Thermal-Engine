@@ -588,9 +588,12 @@ class PropertiesPanel(QWidget):
     property_will_change = Signal()  # Emitted before first change (for undo)
     alignment_changed = Signal()  # Emitted when elements are aligned
     alignment_will_change = Signal()  # Emitted before alignment (for undo)
+    element_changed = Signal() 
+    elements_selected = Signal(list)
 
     def __init__(self):
         super().__init__()
+        self._updating = False
         self.current_element = None
         self.multi_selection_elements = []
         self.multi_selection_indices = []
@@ -679,7 +682,7 @@ class PropertiesPanel(QWidget):
         """Set an SVG icon on a button using QIcon."""
         from PySide6.QtSvg import QSvgRenderer
         from PySide6.QtGui import QPixmap, QPainter
-        from PySide6.QtCore import QByteArray
+        from PySide6.QtCore import QByteArray, Signal
 
         # Replace currentColor with actual color based on palette
         color = "#cccccc"  # Light gray for dark theme
@@ -1515,6 +1518,32 @@ class PropertiesPanel(QWidget):
         v_align_widget.setLayout(v_align_layout)
         alignment_layout.addRow(QLabel("Vertical:"), v_align_widget)
 
+        # --- Sección de Reacción Térmica ---
+        thermal_group = QGroupBox("Thermal Reaction")
+        thermal_layout = QFormLayout()
+
+        # 1. Checkbox para activar/desactivar
+        self.thermal_reactive_check = QCheckBox("Enable Thermal Color")
+        self.thermal_reactive_check.stateChanged.connect(self.on_property_changed)
+
+        # 2. Selector de objetivo (CPU o GPU)
+        self.thermal_target_combo = QComboBox()
+        self.thermal_target_combo.addItems(["CPU", "GPU"])
+        self.thermal_target_combo.currentIndexChanged.connect(self.on_property_changed)
+
+        # 3. Botón para elegir el color de alerta
+        self.thermal_color_btn = QPushButton()
+        self.thermal_color_btn.setFixedSize(40, 24)
+        self.thermal_color_btn.clicked.connect(self.choose_thermal_color)
+
+        thermal_layout.addRow(self.thermal_reactive_check)
+        thermal_layout.addRow("Monitor Target:", self.thermal_target_combo)
+        thermal_layout.addRow("Alert Color:", self.thermal_color_btn)
+
+        thermal_group.setLayout(thermal_layout)
+        # Añadir el grupo al layout principal del panel de propiedades
+        self.layout().addWidget(thermal_group)
+
         # Distribution
         dist_layout = QHBoxLayout()
         self.dist_h_btn = QPushButton()
@@ -1604,8 +1633,15 @@ class PropertiesPanel(QWidget):
             if self.source_combo.itemData(i, Qt.ItemDataRole.UserRole) == source_id:
                 self.source_combo.setCurrentIndex(i)
                 return
-        # Fallback to static if not found
-        self.set_source_by_id("static")
+                
+        # Fallback to static if not found (con freno de emergencia para evitar RecursionError)
+        if source_id != "static":
+            self.set_source_by_id("static")
+        else:
+            # Si llegó aquí, es que ni siquiera "static" está en el menú.
+            # Lo dejamos en el primer elemento disponible (índice 0) por seguridad.
+            if self.source_combo.count() > 0:
+                self.source_combo.setCurrentIndex(0)
 
     def on_source_changed(self, index):
         """Handle source combo box selection change."""
@@ -1967,6 +2003,7 @@ class PropertiesPanel(QWidget):
             header.setVisible(section_visible.get(section, False))
 
     def set_element(self, element):
+        self._updating = True # Evitar loops de eventos
         self.current_element = None
         self.multi_selection_elements = []
         self.multi_selection_indices = []
@@ -2215,6 +2252,15 @@ class PropertiesPanel(QWidget):
 
         # Enable/disable controls based on locked state
         self.set_controls_enabled(not element.locked)
+        
+        # Cargar valores térmicos
+        self.thermal_reactive_check.setChecked(element.thermal_reactive)
+        index = 0 if element.thermal_target == "cpu" else 1
+        self.thermal_target_combo.setCurrentIndex(index)
+        self.thermal_color_btn.setStyleSheet(f"background-color: {element.thermal_color}; border: 1px solid #555;")
+        
+        self._updating = False
+
 
     def set_controls_enabled(self, enabled):
         """Enable or disable all property controls."""
@@ -2297,6 +2343,16 @@ class PropertiesPanel(QWidget):
         self.smooth_animation_check.setEnabled(enabled)
 
     def on_property_changed(self):
+        if self._updating or not self.current_element:
+            return
+            
+        # Guardar cambios en el elemento
+        self.current_element.thermal_reactive = self.thermal_reactive_check.isChecked()
+        self.current_element.thermal_target = "cpu" if self.thermal_target_combo.currentIndex() == 0 else "gpu"
+        
+        # Notificar al canvas que debe redibujar
+        self.element_changed.emit()
+
         if self.current_element is None:
             return
 
@@ -2410,6 +2466,7 @@ class PropertiesPanel(QWidget):
 
         self._last_width = self.width_spin.value()
         self._last_height = self.height_spin.value()
+        
 
         self.property_changed.emit()
 
@@ -2448,6 +2505,17 @@ class PropertiesPanel(QWidget):
             self.current_element.background_color_opacity = dialog.get_opacity()
             self.bg_color_btn.setStyleSheet(f"background-color: {color.name()};")
             self.property_changed.emit()
+
+    def choose_thermal_color(self):
+        if not self.current_element:
+            return
+        
+        color = QColorDialog.getColor(QColor(self.current_element.thermal_color), self, "Select Alert Color")
+        if color.isValid():
+            hex_color = color.name()
+            self.current_element.thermal_color = hex_color
+            self.thermal_color_btn.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #555;")
+            self.element_changed.emit()
 
     def choose_value_text_color(self):
         if self.current_element is None:
