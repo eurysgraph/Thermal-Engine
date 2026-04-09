@@ -197,7 +197,7 @@ MIT License - See LICENSE file for details.
 
 ## Credits
 
-- [Libre Hardware Monitor]([https://www.qt.io/qt-for-python](https://github.com/LibreHardwaRemonitor/LibreHardwareMonitor)) - Sensors Monitor
+- [Libre Hardware Monitor](https://librehardwaremonitor.com/) - Sensors Monitor
 - [PySide6](https://www.qt.io/qt-for-python) - Qt GUI framework
 - [Pillow](https://pillow.readthedocs.io/) - Image processing
 
