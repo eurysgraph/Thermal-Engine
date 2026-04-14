@@ -184,7 +184,6 @@ from presets import PresetsPanel
 from elements import get_custom_element
 from video_background import video_background, HAS_CV2
 
-
 class ThemeEditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -405,14 +404,14 @@ class ThemeEditorWindow(QMainWindow):
         self.cpu_limit_edit.setPlaceholderText("75")
         self.cpu_limit_edit.setValidator(QIntValidator(40, 110)) # Solo números entre 40 y 110
         self.cpu_limit_edit.setText(str(settings.get_setting("cpu_temp_limit", 75)))
-        self.cpu_limit_edit.textChanged.connect(self.save_thermal_settings)
+        #self.cpu_limit_edit.textChanged.connect(self.save_thermal_settings)
 
         # Input GPU
         self.gpu_limit_edit = QLineEdit()
         self.gpu_limit_edit.setPlaceholderText("80")
         self.gpu_limit_edit.setValidator(QIntValidator(40, 110))
         self.gpu_limit_edit.setText(str(settings.get_setting("gpu_temp_limit", 80)))
-        self.gpu_limit_edit.textChanged.connect(self.save_thermal_settings)
+        #self.gpu_limit_edit.textChanged.connect(self.save_thermal_settings)
 
         thermal_form.addRow("CPU Limit (°C):", self.cpu_limit_edit)
         thermal_form.addRow("GPU Limit (°C):", self.gpu_limit_edit)
@@ -674,9 +673,9 @@ class ThemeEditorWindow(QMainWindow):
 
         # Get CPU usage of this process
         try:
-            cpu_percent = self.process.cpu_percent(interval=None)
+            cpu_usage = self.process.cpu_usage(interval=None)
         except:
-            cpu_percent = 0
+            cpu_usage = 0
 
         # Determine status color based on performance
         if not self.device:
@@ -707,7 +706,7 @@ class ThemeEditorWindow(QMainWindow):
             mode_str = " [OD]" if self._overdrive_mode else ""
             skip_str = f" Skip:{self._frames_skipped}" if self._overdrive_mode and self._frames_skipped > 0 else ""
             self.perf_label.setText(
-                f"FPS: {actual_fps:.1f}/{self.target_fps}{mode_str} | CPU: {cpu_percent:.1f}%{mem_str} | {status}{skip_str}"
+                f"FPS: {actual_fps:.1f}/{self.target_fps}{mode_str} | CPU: {cpu_usage:.1f}%{mem_str} | {status}{skip_str}"
             )
             # Reset skip counter periodically
             if self._overdrive_mode:
@@ -738,9 +737,9 @@ class ThemeEditorWindow(QMainWindow):
             ThemeElement("circle_gauge", name="cpu_temp_gauge", x=200, y=240, radius=120,
                          text="CPU TEMP", source="cpu_temp", color="#00ff96", value=45),
             ThemeElement("circle_gauge", name="cpu_load_gauge", x=480, y=240, radius=120,
-                         text="CPU UTIL", source="cpu_percent", color="#00c8ff", value=30),
+                         text="CPU UTIL", source="cpu_usage", color="#00c8ff", value=30),
             ThemeElement("circle_gauge", name="gpu_util_gauge", x=760, y=240, radius=120,
-                         text="GPU UTIL", source="gpu_percent", color="#c864ff", value=55),
+                         text="GPU UTIL", source="cpu_usage", color="#c864ff", value=55),
             ThemeElement("circle_gauge", name="gpu_temp_gauge", x=1040, y=240, radius=120,
                          text="GPU TEMP", source="gpu_temp", color="#ff9632", value=62),
             ThemeElement("text", name="title", x=490, y=20, text="SYSTEM MONITOR",
@@ -949,35 +948,6 @@ class ThemeEditorWindow(QMainWindow):
             return
         self.save_as_preset()
         self.status_bar.showMessage(f"Saved: {self.theme_name}")
-    
-    def save_thermal_settings(self):
-        """Guarda los límites térmicos en el archivo de configuración."""
-        try:
-            cpu_val = int(self.cpu_limit_edit.text()) if self.cpu_limit_edit.text() else 75
-            gpu_val = int(self.gpu_limit_edit.text()) if self.gpu_limit_edit.text() else 80
-            
-            settings.set_setting("cpu_temp_limit", cpu_val)
-            settings.set_setting("gpu_temp_limit", gpu_val)
-            
-            self.status_bar.showMessage(f"Thermal limits updated: CPU {cpu_val}°C / GPU {gpu_val}°C", 3000)
-        except ValueError:
-            pass
-
-    def process_thermal_alerts(self, data):
-        """Esta función SÍ puede tocar la interfaz (self.perf_indicator)"""
-        import settings 
-        cpu_limit = settings.get_setting("cpu_temp_limit", 75)
-        gpu_limit = settings.get_setting("gpu_temp_limit", 80)
-        
-        cpu_actual = data.get("cpu_temp", 0)
-        gpu_actual = data.get("gpu_temp", 0)
-
-        # Si sobrepasa el límite, cambiamos el color a rojo
-        if cpu_actual >= cpu_limit or gpu_actual >= gpu_limit:
-            self.perf_indicator.setStyleSheet("background-color: #ff4444; border-radius: 4px;") 
-        else:
-            # Color verde normal cuando las temperaturas están bien
-            self.perf_indicator.setStyleSheet("background-color: #44ff44; border-radius: 4px;")
 
     def update_element_list_name(self):
         self.element_list.refresh_list()
@@ -1217,11 +1187,11 @@ class ThemeEditorWindow(QMainWindow):
             if value is None:
                 value = 0
                 
-            # --- CORRECCIÓN: Evitamos la lista 'system_fans' porque no es un número ---
-            if key == "system_fans":
+            # --- CORRECCIÓN: Saltamos TODAS las listas dinámicas ---
+            if key in ["system_fans", "cpu_clocks", "gpu_clocks"]:
                 continue 
                 
-            # Si el sensor es un ventilador, bomba o reloj, lo redondeamos a entero
+            # Si el sensor es un ventilador, bomba o reloj general, lo redondeamos a entero
             if 'fan' in key or 'pump' in key or 'clock' in key:
                 try:
                     data[key] = int(round(float(value)))
@@ -1233,16 +1203,32 @@ class ThemeEditorWindow(QMainWindow):
         # Le añadimos la llave 'static' por compatibilidad
         data['static'] = 50
 
-        # Desempaquetamos los ventiladores del chasis asegurando que también sean enteros
+        # --- 1. Desempaquetar Ventiladores del Chasis (sys_fan_0, sys_fan_1...) ---
         if "system_fans" in raw_data and isinstance(raw_data["system_fans"], list):
             for i, fan in enumerate(raw_data["system_fans"]):
-                fan_val = fan.get("value", 0)
-                if fan_val is None:
-                    fan_val = 0
+                fan_val = fan.get("value", 0) if isinstance(fan, dict) else 0
                 try:
-                    data[f"sys_fan_{i+1}"] = int(round(float(fan_val)))
+                    data[f"sys_fan_{i}"] = int(round(float(fan_val)))
                 except (ValueError, TypeError):
-                    data[f"sys_fan_{i+1}"] = 0
+                    data[f"sys_fan_{i}"] = 0
+
+        # --- 2. Desempaquetar Relojes de CPU (cpu_clock_0, cpu_clock_1...) ---
+        if "cpu_clocks" in raw_data and isinstance(raw_data["cpu_clocks"], list):
+            for i, clock in enumerate(raw_data["cpu_clocks"]):
+                clock_val = clock.get("value", 0) if isinstance(clock, dict) else 0
+                try:
+                    data[f"cpu_clock_{i}"] = int(round(float(clock_val)))
+                except (ValueError, TypeError):
+                    data[f"cpu_clock_{i}"] = 0
+
+        # --- 3. Desempaquetar Relojes de GPU (gpu_clock_0, gpu_clock_1...) ---
+        if "gpu_clocks" in raw_data and isinstance(raw_data["gpu_clocks"], list):
+            for i, clock in enumerate(raw_data["gpu_clocks"]):
+                clock_val = clock.get("value", 0) if isinstance(clock, dict) else 0
+                try:
+                    data[f"gpu_clock_{i}"] = int(round(float(clock_val)))
+                except (ValueError, TypeError):
+                    data[f"gpu_clock_{i}"] = 0
 
         return data
 

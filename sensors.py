@@ -15,17 +15,20 @@ try:
 except Exception as e:
     print(f"[Sensors] Error cargando DLL: {e}")
 
-# Fuente única de verdad. Los nombres DEBEN coincidir con constants.py
 _latest_sensor_data = {
-    "cpu_percent": 0, "cpu_temp": 0, "cpu_power": 0, "cpu_fan": 0,
-    "gpu_percent": 0, "gpu_temp": 0, "gpu_fan": 0, "gpu_power": 0,
-    "aio_pump": 0, "ram_percent": 0, "ram_used": 0, "ram_available": 0,
+    # --- CPU
+    "cpu_usage": 0, "cpu_temp": 0, "cpu_power": 0, "cpu_clocks": [],
+    # --- GPU
+    "gpu_usage": 0, "gpu_temp": 0, "gpu_fan": 0, "gpu_power": 0, "gpu_clocks": [], # 🔥 Corregido: decía cpu_usage aquí
+    # --- Super I/o
+    "aio_pump": 0, "ram_usage": 0, "ram_used": 0, "ram_available": 0,
     "net_download": 0, "net_upload": 0, "system_fans": []
 }
 
 _sensor_data_lock = threading.Lock()
 _sensor_thread_running = False
 _sensor_thread = None
+_time_loop = 1
 _pc_instance = None
 
 def init_sensors():
@@ -60,8 +63,11 @@ def _update_loop():
             continue
             
         temp_data = _latest_sensor_data.copy()
-        # Limpiamos la lista de ventiladores y network en cada ciclo para que no se dupliquen
+        
+        # 🔥 CRÍTICO: Limpiar TODAS las listas dinámicas aquí para evitar NameErrors y duplicados
         temp_data["system_fans"] = [] 
+        temp_data["cpu_clocks"] = [] 
+        temp_data["gpu_clocks"] = [] 
         temp_data["net_upload"] = 0
         temp_data["net_download"] = 0
 
@@ -78,33 +84,47 @@ def _update_loop():
                     # --- CPU ---
                     if hw_type == 'Cpu':
                         if sensor_type == 'Temperature':
-                            # Cubre Intel ('package') y AMD ('tctl', 'tdie', 'ccd')
-                            if 'package' in name or 'tctl' in name or 'ccd' in name:
+                            if 'package' in name or 'tctl' in name or 'tctl/tdie' in name:
                                 temp_data["cpu_temp"] = val
-                            # Fallback de seguridad si tiene otro nombre raro
                             elif temp_data.get("cpu_temp", 0) == 0 and 'core' in name:
                                 temp_data["cpu_temp"] = val
-                                
+
                         elif sensor_type == 'Load' and 'total' in name:
-                            temp_data["cpu_percent"] = val
+                            temp_data["cpu_usage"] = val
+
                         elif sensor_type == 'Power' and 'package' in name:
                             temp_data["cpu_power"] = val
+
+                        elif sensor_type == 'Clock':
+                            temp_data["cpu_clocks"].append({
+                                "name": sensor.Name,
+                                "value": val
+                            })
 
                     # --- GPU ---
                     elif 'Gpu' in hw_type:
                         if sensor_type == 'Temperature' and 'core' in name:
                             temp_data["gpu_temp"] = val
+
                         elif sensor_type == 'Load' and 'core' in name:
-                            temp_data["gpu_percent"] = val
-                        elif sensor_type == 'Power': 
+                            temp_data["gpu_usage"] = val
+
+                        elif sensor_type == 'Power':
                             temp_data["gpu_power"] = val
+
                         elif sensor_type == 'Fan':
                             temp_data["gpu_fan"] = val
+
+                        elif sensor_type == 'Clock':
+                            temp_data["gpu_clocks"].append({
+                                "name": sensor.Name,
+                                "value": val
+                            })
                             
                     # --- RAM ---
                     elif hw_type == 'Memory':
                         if sensor_type == 'Load':
-                            temp_data["ram_percent"] = val
+                            temp_data["ram_usage"] = val
                         elif sensor_type == 'Data' and 'used' in name:
                             temp_data["ram_used"] = val
                         elif sensor_type == 'Data' and 'available' in name:
@@ -113,26 +133,19 @@ def _update_loop():
                     # --- MOTHERBOARD & SUPER I/O (Ventiladores) ---
                     elif hw_type in ['Motherboard', 'SuperIO']:
                         if sensor_type == 'Fan':
-                            if 'pump' in name or 'aio' in name or 'opt' in name:
-                                temp_data["aio_pump"] = val
-                            elif 'cpu' in name:
-                                temp_data["cpu_fan"] = val
-                            else:
-                                # Cualquier otro ventilador va a la lista de sistema
-                                temp_data["system_fans"].append({
-                                    "name": str(sensor.Name), 
-                                    "value": val
-                                })
+                            temp_data["system_fans"].append({
+                                "name": str(sensor.Name), 
+                                "value": val
+                            })
+                                
                     # --- NETWORK (Red) ---
                     elif hw_type == 'Network':
                         if sensor_type == 'Throughput':
-                            # LHM devuelve Bytes/s. Dividimos entre (1024 * 1024) para obtener MB/s
                             mb_s = val / 1048576.0
                             if 'upload' in name:
                                 temp_data["net_upload"] += mb_s
                             elif 'download' in name:
                                 temp_data["net_download"] += mb_s
-                    
 
                 for sub_hw in hardware_item.SubHardware:
                     extract_sensors(sub_hw)
@@ -146,7 +159,7 @@ def _update_loop():
         with _sensor_data_lock:
             _latest_sensor_data = temp_data
             
-        time.sleep(1)
+        time.sleep(_time_loop)
 
 def get_cached_sensors():
     """Devuelve una copia segura de los datos actuales. Usar en la UI."""
@@ -165,30 +178,75 @@ def stop_sensors():
 
 # --- NUEVA FUNCIÓN DE DEBUG ---
 def debug_print_sensors():
-    # """Imprime todas las variables actuales para verificar lecturas."""
     data = get_cached_sensors()
     
-    # Importar os aquí por si no estaba arriba
     import os 
     os.system('cls' if os.name == 'nt' else 'clear')
     
     print("=== DEBUG DE SENSORES (LHM) ===")
     for key, value in data.items():
-        if key != "system_fans":
-            # Protegemos contra valores 'None'
+        # Ignoramos las listas para imprimirlas bonito más abajo
+        if key not in ["system_fans", "cpu_clocks", "gpu_clocks"]:
             val_seguro = value if value is not None else 0
             status = "✅" if val_seguro > 0 else "❌"
             print(f"{status} {key.ljust(20)}: {value}")
     
+    print("\n--- RELOJES DE CPU ---")
+    for clock in data.get("cpu_clocks", []):
+        print(f"⏱️ {clock['name'].ljust(15)}: {clock['value']:.1f} MHz")
+        
+    print("\n--- RELOJES DE GPU ---")
+    for clock in data.get("gpu_clocks", []):
+        print(f"⏱️ {clock['name'].ljust(15)}: {clock['value']:.1f} MHz")
+
     print("\n--- VENTILADORES DEL SISTEMA ---")
-    # Usamos .get() para que no de error si la llave no existe
-    sys_fans = data.get("system_fans") 
+    sys_fans = data.get("system_fans", [])
     if sys_fans:
         for fan in sys_fans:
-            print(f"✅ {fan['name'].ljust(20)}: {fan['value']} RPM")
+            print(f"💨 {fan['name'].ljust(15)}: {fan['value']} RPM")
     else:
-        print("❌ No se detectaron ventiladores agrupados en 'system_fans'")
+        print("❌ No se detectaron ventiladores de sistema extra.")
     print("================================")
+
+
+class SensorManager:
+    def __init__(self):
+        self.critical_sensors = ["cpu_temp", "gpu_temp"]
+        self.max_retries = 5  # 5 intentos x 3 segundos = 15 segundos máximo de espera
+        self.retry_delay = 3 
+
+    def check_system_readiness(self):
+        """
+        Scans for sensors. Returns an empty list if all are found.
+        Returns a list of missing sensor names if the timeout is reached.
+        """
+        print("[SensorManager] Starting sensor validation sequence...")
+        
+        for attempt in range(1, self.max_retries + 1):
+            current_readings = get_cached_sensors() 
+            failed_sensors = []
+            
+            for sensor in self.critical_sensors:
+                value = current_readings.get(sensor, 0)
+                if value is None or value <= 0:
+                    failed_sensors.append(sensor)
+            
+            if not failed_sensors:
+                print(f"[SensorManager] Success: All critical sensors are online.")
+                return [] # Retorna lista vacía (Todo bien)
+            
+            print(f"[SensorManager] Attempt {attempt}/{self.max_retries}: Waiting for {failed_sensors}...")
+            if attempt < self.max_retries:
+                time.sleep(self.retry_delay)
+        
+        # Si el bucle termina, significa que se agotó el tiempo y faltan sensores
+        self.report_initialization_error(failed_sensors)
+        return failed_sensors # Retorna los que fallaron
+
+    def report_initialization_error(self, failed_sensors):
+        error_message = f"Timeout reached. Missing sensors: {', '.join(failed_sensors)}"
+        print(f"[SensorManager] WARNING: {error_message}")
+
 
 # --- PRUEBA DIRECTA ---
 if __name__ == "__main__":
@@ -197,12 +255,12 @@ if __name__ == "__main__":
     
     # Damos 2 segundos para que la DLL despierte y lea la placa base
     import time
-    time.sleep(2) 
+    time.sleep(_time_loop) 
     
     try:
         while True:
             debug_print_sensors()
-            time.sleep(1)
+            time.sleep(_time_loop)
     except KeyboardInterrupt:
         print("\n[Test] Prueba cancelada por el usuario.")
         stop_sensors()

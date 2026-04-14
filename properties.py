@@ -7,10 +7,10 @@ from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QColorDialog, QFileDialog, QComboBox,
     QFormLayout, QScrollArea, QFrame, QCheckBox, QPushButton,
     QStyledItemDelegate, QStyle, QSlider, QDialog, QDialogButtonBox,
-    QSizePolicy, QGroupBox
+    QSizePolicy, QGroupBox, QTreeView, QHeaderView
 )
 from PySide6.QtCore import Qt, Signal, QSize, QRect, QPoint
-from PySide6.QtGui import QColor, QFont, QPixmap, QFontDatabase, QPainter, QLinearGradient, QPen, QBrush, QIcon
+from PySide6.QtGui import QColor, QFont, QPixmap, QFontDatabase, QPainter, QLinearGradient, QPen, QBrush, QIcon, QStandardItemModel, QStandardItem
 
 
 class NoScrollComboBox(QComboBox):
@@ -547,7 +547,7 @@ class GradientBarEditor(QWidget):
         return "#ffffff"
 
 
-from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, DATA_SOURCES, DATA_SOURCES_CATEGORIZED
+from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, DATA_SOURCES, get_data_sources_categorized
 
 
 class FontPreviewDelegate(QStyledItemDelegate):
@@ -1151,9 +1151,60 @@ class PropertiesPanel(QWidget):
         self.value_label = self.create_label("Preview Value:")
         data_layout.addRow(self.value_label, self.value_spin)
 
+        # THERMAL REACTION UI SETTINGS
+        self.thermal_label = self.create_label("Thermal Reaction -------------------")
+        data_layout.addRow(self.thermal_label)
+
+        self.thermal_checkBox = QCheckBox("Active Adverteces")
+        self.thermal_checkBox.toggled.connect(self.on_property_changed)
+        self.thermal_checkbox_label = QLabel("")
+        data_layout.addRow(self.thermal_checkBox)
+
+        self.thermal_warn_spin = NoScrollDoubleSpinBox()
+        self.thermal_warn_spin.setRange(0, 100)
+        self.thermal_warn_spin.setValue(65)
+        self.thermal_warn_spin.valueChanged.connect(self.on_property_changed)
+        self.thermal_warn_label = self.create_label("Limit Warning Value:")
+        data_layout.addRow(self.thermal_warn_label, self.thermal_warn_spin)
+
+        self.thermal_warn_color = QPushButton()
+        self.thermal_warn_color.setFixedHeight(26)
+        self.thermal_warn_color.setFixedWidth(115)
+        self.thermal_warn_color.setText("")
+        self.thermal_warn_color.setStyleSheet(
+            "background-color: #ffaa00; border: 1px solid #555;"
+        )
+        self.thermal_warn_color.clicked.connect(self.choose_thermal_warn_color)
+        self.thermal_warn_color_label = self.create_label("Warning Color:")
+        data_layout.addRow(self.thermal_warn_color_label, self.thermal_warn_color)
+
+        self.thermal_crit_spin = NoScrollDoubleSpinBox()
+        self.thermal_crit_spin.setRange(0, 100)
+        self.thermal_crit_spin.setValue(80)
+        self.thermal_crit_spin.valueChanged.connect(self.on_property_changed)
+        self.thermal_crit_label = self.create_label("Limit Critical Value:")
+        data_layout.addRow(self.thermal_crit_label, self.thermal_crit_spin)
+
+        self.thermal_crit_color = QPushButton()
+        self.thermal_crit_color.setFixedHeight(26)
+        self.thermal_crit_color.setFixedWidth(115)
+        self.thermal_crit_color.setText("")
+        self.thermal_crit_color.setStyleSheet(
+            "background-color: #ff0000; border: 1px solid #555;"
+        )
+        self.thermal_crit_color.clicked.connect(self.choose_thermal_crit_color)
+        self.thermal_crit_color_label = self.create_label("Critical Color:")
+        data_layout.addRow(self.thermal_crit_color_label, self.thermal_crit_color)
+
         self.section_fields['data'] = [
             (self.source_label, self.source_combo),
-            (self.value_label, self.value_spin)
+            (self.value_label, self.value_spin),
+            (self.thermal_label),
+            (self.thermal_checkbox_label, self.thermal_checkBox),
+            (self.thermal_warn_label, self.thermal_warn_spin),
+            (self.thermal_warn_color_label, self.thermal_warn_color),
+            (self.thermal_crit_label, self.thermal_crit_spin),
+            (self.thermal_crit_color_label, self.thermal_crit_color)
         ]
 
         # === MEDIA SECTION ===
@@ -1518,32 +1569,6 @@ class PropertiesPanel(QWidget):
         v_align_widget.setLayout(v_align_layout)
         alignment_layout.addRow(QLabel("Vertical:"), v_align_widget)
 
-        # --- Sección de Reacción Térmica ---
-        thermal_group = QGroupBox("Thermal Reaction")
-        thermal_layout = QFormLayout()
-
-        # 1. Checkbox para activar/desactivar
-        self.thermal_reactive_check = QCheckBox("Enable Thermal Color")
-        self.thermal_reactive_check.stateChanged.connect(self.on_property_changed)
-
-        # 2. Selector de objetivo (CPU o GPU)
-        self.thermal_target_combo = QComboBox()
-        self.thermal_target_combo.addItems(["CPU", "GPU"])
-        self.thermal_target_combo.currentIndexChanged.connect(self.on_property_changed)
-
-        # 3. Botón para elegir el color de alerta
-        self.thermal_color_btn = QPushButton()
-        self.thermal_color_btn.setFixedSize(40, 24)
-        self.thermal_color_btn.clicked.connect(self.choose_thermal_color)
-
-        thermal_layout.addRow(self.thermal_reactive_check)
-        thermal_layout.addRow("Monitor Target:", self.thermal_target_combo)
-        thermal_layout.addRow("Alert Color:", self.thermal_color_btn)
-
-        thermal_group.setLayout(thermal_layout)
-        # Añadir el grupo al layout principal del panel de propiedades
-        self.layout().addWidget(thermal_group)
-
         # Distribution
         dist_layout = QHBoxLayout()
         self.dist_h_btn = QPushButton()
@@ -1600,26 +1625,76 @@ class PropertiesPanel(QWidget):
 
     def setup_source_combo(self):
         """Setup the source combo box with categorized items."""
+        dynamic_sources = get_data_sources_categorized()
         self.source_combo.clear()
 
-        for category, sources in DATA_SOURCES_CATEGORIZED.items():
-            # Add category header (disabled, styled differently)
-            self.source_combo.addItem(f"── {category} ──")
-            idx = self.source_combo.count() - 1
-            # Make header item non-selectable
-            self.source_combo.model().item(idx).setEnabled(False)
+        # 2. Transformamos el ComboBox plano en un Árbol Desplegable
+        tree_view = QTreeView()
+        # Ajustar las columnas al contenido para que no se corten los nombres
+        tree_view.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
 
-            # Add sources in this category
-            for source_info in sources:
-                source_id, source_name, unit_type, unit_symbol = source_info
-                # Don't show unit symbol for static value
-                if source_id == "static":
-                    self.source_combo.addItem(f"    {source_name}")
+        # Hacer que la ventana desplegable sea tan ancha como el árbol necesite
+        self.source_combo.view().setMinimumWidth(500) # Puedes subir este número (ej: 350 o 400)
+        tree_view.setHeaderHidden(True)      # Ocultar la cabecera de las columnas
+        tree_view.setIndentation(15)         # Sangría para los sub-menús
+        self.source_combo.setView(tree_view) # ¡Inyectamos el árbol en el ComboBox!
+
+        # 3. Creamos la estructura de datos
+        model = QStandardItemModel()
+
+        CATEGORY_ICONS = {
+            "CPU": "💻",
+            "GPU": "🎮",
+            "Memory": "🧠",
+            "Network": "🌐",
+            "System Fans": "🌪️",
+            "General": "⚙️"
+        }
+
+        for category, items in dynamic_sources.items():
+            # 1. Creamos el título de la categoría principal (ej: 🌪️ System Fans)
+            icon = CATEGORY_ICONS.get(category, "📁")
+            parent_item = QStandardItem(f"{icon} {category}")
+            parent_item.setSelectable(False)
+            
+            # Ponemos el título en negrita para que resalte
+            font = parent_item.font()
+            font.setBold(True)
+            parent_item.setFont(font)
+
+            # 2. Solo mantenemos el grupo de Clocks (porque esos sí son muchos)
+            clocks_group = QStandardItem("⏱️ Relojes (Frecuencias)")
+            clocks_group.setSelectable(False)
+
+            for source_id, display_name, _, _ in items:
+                # Personalización de iconos individuales
+                sensor_icon = "📍" 
+                if "Temp" in display_name: sensor_icon = "🔥"
+                elif "Usage" in display_name or "%" in display_name: sensor_icon = "📈"
+                elif "Power" in display_name or "W" in display_name: sensor_icon = "⚡"
+                elif "Fan" in display_name or "Pump" in display_name: sensor_icon = "🌀" # Icono para ventilador
+                
+                item = QStandardItem(f"{sensor_icon} {display_name}")
+                item.setData(source_id, Qt.ItemDataRole.UserRole)
+
+                # --- LÓGICA DE CLASIFICACIÓN MODIFICADA ---
+                if "Clock:" in display_name:
+                    # Los relojes siguen yendo a su sub-carpeta
+                    clocks_group.appendRow(item)
                 else:
-                    self.source_combo.addItem(f"    {source_name} ({unit_symbol})")
-                idx = self.source_combo.count() - 1
-                # Store the actual source ID in item data
-                self.source_combo.setItemData(idx, source_id, Qt.ItemDataRole.UserRole)
+                    # TODO LO DEMÁS (Ventiladores, Temperaturas, Watts) va directo a la raíz de la categoría
+                    # Esto elimina la carpeta intermedia de "Ventiladores"
+                    parent_item.appendRow(item)
+
+            # Añadimos la sub-carpeta de relojes solo si tiene algo
+            if clocks_group.rowCount() > 0:
+                parent_item.appendRow(clocks_group)
+
+            model.appendRow(parent_item)
+
+        # 4. Le aplicamos el modelo terminado a nuestro ComboBox
+        self.source_combo.setModel(model)
+        
 
     def get_selected_source(self):
         """Get the currently selected source ID."""
@@ -1643,16 +1718,16 @@ class PropertiesPanel(QWidget):
             if self.source_combo.count() > 0:
                 self.source_combo.setCurrentIndex(0)
 
-    def on_source_changed(self, index):
-        """Handle source combo box selection change."""
-        # Skip if header item selected (find next valid item)
-        source_id = self.source_combo.itemData(index, Qt.ItemDataRole.UserRole)
-        if source_id is None:
-            # Find next valid item
-            for i in range(index + 1, self.source_combo.count()):
-                if self.source_combo.itemData(i, Qt.ItemDataRole.UserRole):
-                    self.source_combo.setCurrentIndex(i)
-                    return
+    def on_source_changed(self, index=None):
+        """Handle source combo box selection change with TreeView support."""
+        # 1. Leemos la selección directamente desde la vista del árbol interno
+        tree_index = self.source_combo.view().currentIndex()
+        
+        # 2. Extraemos el ID oculto de la rama exacta que se tocó
+        source_id = tree_index.data(Qt.ItemDataRole.UserRole)
+        
+        # 3. Si el usuario hace clic en una "Carpeta" (que no tiene ID), simplemente ignoramos
+        if not source_id:
             return
 
         # Update preview value visibility based on whether source is static
@@ -1666,6 +1741,8 @@ class PropertiesPanel(QWidget):
             if not self._undo_state_saved:
                 self.property_will_change.emit()
                 self._undo_state_saved = True
+            
+            # Asignamos el ID real (ej: cpu_clock_0) al elemento
             self.current_element.source = source_id
             self.property_changed.emit()
 
@@ -2081,6 +2158,11 @@ class PropertiesPanel(QWidget):
         self.clock_face_style_combo.blockSignals(True)
         self.smooth_animation_check.blockSignals(True)
 
+        # --- Thermal Reaction Block Signals ---
+        self.thermal_checkBox.blockSignals(True)
+        self.thermal_warn_spin.blockSignals(True)
+        self.thermal_crit_spin.blockSignals(True)
+
         self.name_edit.setText(element.name)
         self.x_spin.setValue(element.x)
         self.y_spin.setValue(element.y)
@@ -2189,6 +2271,19 @@ class PropertiesPanel(QWidget):
 
         self.set_source_by_id(element.source)
 
+        # Thermal Reaction Values
+        self.thermal_checkBox.setChecked(element.thermal_enabled)
+        self.thermal_warn_spin.setValue(element.thermal_warn_value)
+        self.thermal_crit_spin.setValue(element.thermal_crit_value)
+        # colores
+        self.thermal_warn_color.setStyleSheet(
+            f"background-color: {element.thermal_warn_color}; border: 1px solid #555;"
+        )
+
+        self.thermal_crit_color.setStyleSheet(
+            f"background-color: {element.thermal_crit_color}; border: 1px solid #555;"
+        )
+
         self.name_edit.blockSignals(False)
         self.x_spin.blockSignals(False)
         self.y_spin.blockSignals(False)
@@ -2244,6 +2339,11 @@ class PropertiesPanel(QWidget):
         self.clock_face_style_combo.blockSignals(False)
         self.smooth_animation_check.blockSignals(False)
 
+        # --- Thermal Reaction Unblock Signals ---
+        self.thermal_checkBox.blockSignals(False)
+        self.thermal_warn_spin.blockSignals(False)
+        self.thermal_crit_spin.blockSignals(False)
+
         self.current_element = element
         self._undo_state_saved = False
 
@@ -2252,12 +2352,6 @@ class PropertiesPanel(QWidget):
 
         # Enable/disable controls based on locked state
         self.set_controls_enabled(not element.locked)
-        
-        # Cargar valores térmicos
-        self.thermal_reactive_check.setChecked(element.thermal_reactive)
-        index = 0 if element.thermal_target == "cpu" else 1
-        self.thermal_target_combo.setCurrentIndex(index)
-        self.thermal_color_btn.setStyleSheet(f"background-color: {element.thermal_color}; border: 1px solid #555;")
         
         self._updating = False
 
@@ -2299,6 +2393,13 @@ class PropertiesPanel(QWidget):
         # Source and value
         self.source_combo.setEnabled(enabled)
         self.value_spin.setEnabled(enabled)
+
+        # Thermal Reaction
+        self.thermal_checkBox.setEnabled(enabled)
+        self.thermal_warn_spin.setEnabled(enabled)
+        self.thermal_warn_color.setEnabled(enabled)
+        self.thermal_crit_spin.setEnabled(enabled)
+        self.thermal_crit_color.setEnabled(enabled)
 
         # Image properties
         self.image_path_edit.setEnabled(enabled)
@@ -2345,13 +2446,6 @@ class PropertiesPanel(QWidget):
     def on_property_changed(self):
         if self._updating or not self.current_element:
             return
-            
-        # Guardar cambios en el elemento
-        self.current_element.thermal_reactive = self.thermal_reactive_check.isChecked()
-        self.current_element.thermal_target = "cpu" if self.thermal_target_combo.currentIndex() == 0 else "gpu"
-        
-        # Notificar al canvas que debe redibujar
-        self.element_changed.emit()
 
         if self.current_element is None:
             return
@@ -2466,7 +2560,11 @@ class PropertiesPanel(QWidget):
 
         self._last_width = self.width_spin.value()
         self._last_height = self.height_spin.value()
-        
+
+        # Thermal Reaction
+        self.current_element.thermal_enabled = self.thermal_checkBox.isChecked()
+        self.current_element.thermal_warn_value = self.thermal_warn_spin.value()
+        self.current_element.thermal_crit_value = self.thermal_crit_spin.value()
 
         self.property_changed.emit()
 
@@ -2506,15 +2604,50 @@ class PropertiesPanel(QWidget):
             self.bg_color_btn.setStyleSheet(f"background-color: {color.name()};")
             self.property_changed.emit()
 
-    def choose_thermal_color(self):
+    def choose_thermal_crit_color(self):
         if not self.current_element:
             return
         
-        color = QColorDialog.getColor(QColor(self.current_element.thermal_color), self, "Select Alert Color")
+        color = QColorDialog.getColor(
+            QColor(self.current_element.thermal_crit_color),
+            self,
+            "Select Alert Color"
+        )
+
         if color.isValid():
             hex_color = color.name()
-            self.current_element.thermal_color = hex_color
-            self.thermal_color_btn.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #555;")
+
+            # guardar en el elemento
+            self.current_element.thermal_crit_color = hex_color
+
+            # aplicar al botón correcto 👇
+            self.thermal_crit_color.setStyleSheet(
+                f"background-color: {hex_color}; border: 1px solid #555;"
+            )
+
+            self.element_changed.emit()
+
+    def choose_thermal_warn_color(self):
+        if not self.current_element:
+            return
+        
+        color = QColorDialog.getColor(
+            QColor(self.current_element.thermal_warn_color),
+            self,
+            "Select Alert Color"
+        )
+
+        if color.isValid():
+            hex_color = color.name()
+
+            # guardar en el elemento
+            self.current_element.thermal_warn_color = hex_color
+
+            # aplicar al botón correcto 👇
+            self.thermal_warn_color.setStyleSheet(
+                f"background-color: {hex_color}; border: 1px solid #555;"
+            )
+
             self.element_changed.emit()
 
     def choose_value_text_color(self):

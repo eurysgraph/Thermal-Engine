@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QFont
 from PySide6.QtCore import Qt
 
-from sensors import init_sensors, stop_sensors
+from sensors import init_sensors, stop_sensors, SensorManager
 from main_window import ThemeEditorWindow
 from app_path import get_app_dir
 import settings
@@ -76,8 +76,31 @@ def main():
     palette.setColor(palette.ColorRole.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
 
-    # Inicializar el motor LHM
+    # Inicializar el motor LHM (Esto arranca el hilo en segundo plano)
     init_sensors()
+
+    # 2. Validar qué sensores están disponibles
+    sensor_validator = SensorManager()
+    missing_sensors = sensor_validator.check_system_readiness()
+
+    # 3. Comprobar resultados y lanzar alerta si es necesario
+    if missing_sensors:
+        print(f"Proceeding with missing sensors: {missing_sensors}")
+        
+        # Crear alerta visual (Asegúrate de tener importado QMessageBox arriba)
+        # from PySide6.QtWidgets import QMessageBox
+        warning_msg = QMessageBox()
+        warning_msg.setIcon(QMessageBox.Icon.Warning)
+        warning_msg.setWindowTitle("Hardware Detection Warning")
+        warning_msg.setText("Some hardware sensors could not be detected.")
+        warning_msg.setInformativeText(
+            f"Missing components: {', '.join(missing_sensors)}\n\n"
+            "The application will continue to load, but these values will remain at 0. "
+            "This is normal if your PC does not have these components installed."
+        )
+        warning_msg.exec() # Pausa la ejecución hasta que el usuario le de a "OK"
+    else:
+        print("Thermal-Engine core started successfully with all hardware detected.")
 
     # Iniciar ventana principal
     window = ThemeEditorWindow()
