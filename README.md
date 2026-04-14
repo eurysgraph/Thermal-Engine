@@ -38,32 +38,11 @@ A visual theme editor for **LCD AIO cooler displays** (1280x480). Create custom 
 ## Requirements
 
 - Windows 10/11
-- **HWiNFO** (for hardware sensor data) - [Download here](https://www.hwinfo.com/)
 - Python 3.10+ (only if running from source)
 
 ### Hardware Sensor Support
 
-ThermalEngine uses **HWiNFO Shared Memory** to read hardware sensors. This approach:
-- Requires no admin privileges
-- Has no driver blocklist issues
-- Works with all CPUs and GPUs that HWiNFO supports
-
-**Supported hardware** (via HWiNFO):
-- **CPUs**: Intel Core (all generations), AMD Ryzen (all generations)
-- **GPUs**: NVIDIA GeForce, AMD Radeon
-
-**Setup HWiNFO for ThermalEngine:**
-
-1. Download [HWiNFO](https://www.hwinfo.com/) (installer or portable)
-2. Run HWiNFO and select "Sensors-only" mode
-3. Go to **Settings** (gear icon)
-4. Check **"Shared Memory Support"**
-5. Click OK
-6. Keep HWiNFO running while using ThermalEngine
-
-> **Tip:** Configure HWiNFO to start with Windows and run minimized to tray. ThermalEngine will automatically connect when HWiNFO becomes available.
-
-> **Note:** The free version of HWiNFO has a **12-hour limit** on Shared Memory Support. After 12 hours, shared memory will be disabled and sensors will stop updating. To restore sensors, restart HWiNFO. For uninterrupted monitoring, consider [HWiNFO Pro](https://www.hwinfo.com/licenses/) which removes this limitation.
+Previously, there was a dependency on the third-party program HWINFO. We have now completely removed that dependency so that this software can monitor the sensors internally using the Libre Hardware Monitor DLLs.
 
 ## Installation
 
@@ -127,11 +106,7 @@ Build a standalone executable locally:
 
 ### Setting Up Sensors
 
-1. **Start HWiNFO** with "Sensors-only" mode
-2. **Enable Shared Memory** in HWiNFO Settings
-3. Launch ThermalEngine - it will automatically detect HWiNFO
-
-ThermalEngine and HWiNFO can start in any order - sensors will connect automatically when both are running.
+ThermalEngine  - sensors will connect automatically when both are running.
 
 Go to **Display > Diagnose Sensors** to verify sensor connection.
 
@@ -182,12 +157,6 @@ Go to **Display > Diagnose Sensors** to verify sensor connection.
 - Check USB connection
 - Restart the editor
 
-### Sensors showing 0 or not working
-1. **Check HWiNFO is running** - ThermalEngine requires HWiNFO for sensor data
-2. **Enable Shared Memory** in HWiNFO Settings
-3. Go to **Display > Diagnose Sensors** to check connection status
-4. Sensors will auto-connect when HWiNFO becomes available
-
 ### Low FPS / Performance issues
 - Reduce target FPS (10 FPS is usually sufficient)
 - Avoid video backgrounds on older machines
@@ -228,7 +197,7 @@ MIT License - See LICENSE file for details.
 
 ## Credits
 
-- [HWiNFO](https://www.hwinfo.com/) - Hardware sensor data provider
+- [Libre Hardware Monitor](https://librehardwaremonitor.com/) - Sensors Monitor
 - [PySide6](https://www.qt.io/qt-for-python) - Qt GUI framework
 - [Pillow](https://pillow.readthedocs.io/) - Image processing
 
