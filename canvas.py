@@ -14,12 +14,69 @@ from elements import get_custom_element
 from video_background import video_background
 
 
-def apply_opacity(color, opacity):
+# --- funcion para la dinamica con Thermal Reaction ---
+def get_dynamic_color(element, base_color, current_sensor_value):
+    """
+    Evalúa si el elemento debe cambiar de color basado en su Thermal Reaction.
+    Retorna el base_color (QColor) si todo está normal, o el color de advertencia/crítico.
+    """
+
+    # 2. Intentamos convertir el valor del sensor a número
+    try:
+        # Si el valor viene con texto (ej. "45 °C"), limpiamos y sacamos el número
+        if isinstance(current_sensor_value, str):
+            import re
+            numbers = re.findall(r"[-+]?\d*\.\d+|\d+", current_sensor_value)
+            if numbers:
+                val = float(numbers[0])
+            else:
+                return base_color
+        else:
+            val = float(current_sensor_value)
+    except (ValueError, TypeError):
+        return base_color # Si no es un número (ej. nombre del procesador), no hacemos nada
+
+    # 3. Extraemos los límites guardados en el elemento
+    crit_limit = getattr(element, 'thermal_crit_value', 80.0)
+    warn_limit = getattr(element, 'thermal_warn_value', 65.0)
+
+    # 4. Evaluamos de más caliente a más frío
+    from PySide6.QtGui import QColor
+
+    if val >= crit_limit:
+        hex_color = getattr(element, 'thermal_crit_color', '#ff0000')
+        return QColor(hex_color)
+        
+    elif val >= warn_limit:
+        hex_color = getattr(element, 'thermal_warn_color', '#ffaa00')
+        return QColor(hex_color)
+
+    # Si está frío, mantenemos el color base
+    return base_color
+
+
+def apply_opacity(color, opacity, element=None):
     """Apply opacity (0-100) to a QColor and return the modified color."""
+    
+    # --- 1. NUEVO: EFECTO TÉRMICO ---
+    # Si nos pasaron el elemento, verificamos si necesita cambiar de color por temperatura
+    if element and getattr(element, 'source', 'static') != 'static':
+        # Leemos qué sabe el lienzo del elemento en este exacto milisegundo
+        is_active = getattr(element, 'thermal_enabled', False)
+        valor = getattr(element, 'value', 0)
+        
+        # EL MICRÓFONO: Imprimirá en la consola qué está pasando
+        # print(f"🎨 Pintando -> Sensor: {element.source} | ¿Activado?: {is_active} | Temp: {valor}")
+        
+        if is_active:
+            color = get_dynamic_color(element, color, valor)
+
+    # --- 2. ORIGINAL: OPACIDAD ---
     if isinstance(color, str):
         color = QColor(color)
     else:
         color = QColor(color)  # Make a copy
+        
     alpha = int(255 * opacity / 100)
     color.setAlpha(alpha)
     return color
@@ -29,14 +86,14 @@ def get_text_color(element):
     """Get the effective text color for an element (value text), with opacity applied."""
     color = getattr(element, 'text_color', element.color)
     opacity = getattr(element, 'text_color_opacity', 100)
-    return apply_opacity(color, opacity)
+    return apply_opacity(color, opacity, element)
 
 
 def get_label_text_color(element):
     """Get the label text color for an element (circle gauge labels), with opacity applied."""
     color = getattr(element, 'label_text_color', element.color)
     opacity = getattr(element, 'text_color_opacity', 100)
-    return apply_opacity(color, opacity)
+    return apply_opacity(color, opacity, element)
 
 
 def interpolate_gradient_color(gradient_stops, position):
@@ -344,7 +401,8 @@ class CanvasPreview(QWidget):
 
     def draw_circle_gauge(self, painter, element, x, y, selected):
         radius = int(element.radius * self.scale)
-        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100))
+
+        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100), element)
 
         # Get animated display value
         display_value = self.get_animated_value(element)
@@ -370,9 +428,9 @@ class CanvasPreview(QWidget):
                         color_hex = "#ff3232"
             else:
                 color_hex = element.color
-            color = apply_opacity(color_hex, getattr(element, 'color_opacity', 100))
+            color = apply_opacity(color_hex, getattr(element, 'color_opacity', 100), element)
         else:
-            color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
+            color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
 
         # Check for rounded ends (pill shape)
         rounded_ends = getattr(element, 'gauge_rounded_ends', False)
@@ -447,7 +505,7 @@ class CanvasPreview(QWidget):
 
         width = int(element.width * self.scale)
         height = int(element.height * self.scale)
-        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100))
+        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100), element)
 
         # Get animated display value
         display_value = self.get_animated_value(element)
@@ -468,9 +526,9 @@ class CanvasPreview(QWidget):
                     color_hex = "#ff3232"
             else:
                 color_hex = element.color
-            color = apply_opacity(color_hex, getattr(element, 'color_opacity', 100))
+            color = apply_opacity(color_hex, getattr(element, 'color_opacity', 100), element)
         else:
-            color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
+            color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
 
         # Draw background
         if rounded:
@@ -507,7 +565,7 @@ class CanvasPreview(QWidget):
             border_color = getattr(element, 'bar_border_color', '#ffffff')
             border_opacity = getattr(element, 'bar_border_opacity', 100)
             border_position = getattr(element, 'bar_border_position', 'center')
-            border_qcolor = apply_opacity(border_color, border_opacity)
+            border_qcolor = apply_opacity(border_color, border_opacity, element)
 
             border_pen = QPen(border_qcolor, border_width)
             painter.setPen(border_pen)
@@ -793,7 +851,7 @@ class CanvasPreview(QWidget):
                     painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, element.text)
 
     def draw_text(self, painter, element, x, y, selected):
-        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
+        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
 
         painter.setPen(QPen(color))
         font = QFont(element.font_family)
@@ -835,7 +893,9 @@ class CanvasPreview(QWidget):
     def draw_rectangle(self, painter, element, x, y, selected):
         width = int(element.width * self.scale)
         height = int(element.height * self.scale)
-        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
+
+        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
+
         border_radius = int(getattr(element, 'border_radius', 0) * self.scale)
         glass_effect = getattr(element, 'glass_effect', False)
 
@@ -906,7 +966,7 @@ class CanvasPreview(QWidget):
             painter.drawRect(x, y, width, height)
 
     def draw_clock(self, painter, element, x, y, selected):
-        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
+        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
 
         painter.setPen(QPen(color))
         font = QFont(element.font_family)
@@ -957,8 +1017,8 @@ class CanvasPreview(QWidget):
         import datetime
 
         radius = int(element.radius * self.scale)
-        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100))
-        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100))
+        color = apply_opacity(element.color, getattr(element, 'color_opacity', 100), element)
+        bg_color = apply_opacity(element.background_color, getattr(element, 'background_color_opacity', 100), element)
 
         # Get options
         show_seconds = getattr(element, 'show_seconds_hand', True)
@@ -1243,6 +1303,10 @@ class CanvasPreview(QWidget):
             ctrl_held = modifiers & Qt.KeyboardModifier.ControlModifier
             shift_held = modifiers & Qt.KeyboardModifier.ShiftModifier
 
+            # Filtramos para quedarnos solo con los índices que de verdad existan
+            self.selected_indices = [idx for idx in self.selected_indices if idx < len(self.elements)]
+            # ------------------------------
+
             # Check if clicking on resize handle of selected element(s)
             # Don't allow resizing if any selected element is locked
             any_locked = any(self.elements[idx].locked for idx in self.selected_indices) if self.selected_indices else False
@@ -1497,6 +1561,11 @@ class CanvasPreview(QWidget):
             else:
                 self.setCursor(Qt.CursorShape.ArrowCursor)
         elif len(self.selected_indices) == 1:
+            # a la cantidad de elementos reales, limpiamos la selección y abortamos.
+            if self.selected_indices and self.selected_indices[0] >= len(self.elements):
+                self.selected_indices.clear()
+                return
+            # ------------------------------
             element = self.elements[self.selected_indices[0]]
             handle = self.get_handle_at(pos, element)
             if handle in [self.HANDLE_TL, self.HANDLE_BR]:

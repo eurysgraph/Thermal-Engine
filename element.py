@@ -183,7 +183,7 @@ class ThemeElement:
             "locked": self.locked,
             "temp_hide_unit": self.temp_hide_unit
         }
-
+    
     @classmethod
     def from_dict(cls, data):
         return cls(

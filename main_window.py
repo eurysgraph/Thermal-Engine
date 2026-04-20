@@ -8,6 +8,7 @@ import json
 import time
 import io
 import threading
+import copy
 
 # Windows-specific imports for power event handling
 if sys.platform == 'win32':
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QByteArray, Signal, QObject
 from PySide6.QtGui import QColor, QAction, QKeySequence, QIcon, QTextCursor, QFont, QIntValidator
+from canvas import get_dynamic_color
 
 
 class ConsoleOutputStream(QObject):
@@ -134,6 +136,9 @@ except ImportError:
     HAS_HID = False
     print("[Error] Librería 'hid' no encontrada. Las funciones USB estarán deshabilitadas.")
 
+import sensors
+import settings
+from app_path import get_resource_path, get_bundled_resource_path
 from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, SOURCE_UNITS
 from sensors import get_cached_sensors, stop_sensors # <-- IMPORTANTE
 
@@ -162,10 +167,6 @@ def get_value_with_unit(value, source, temp_hide_unit=False):
     else:  # percent
         return f"{value:.0f}{symbol}"
 from element import ThemeElement
-import sensors
-from sensors import get_cached_sensors, stop_sensors
-import settings
-from app_path import get_resource_path, get_bundled_resource_path
 
 
 def hex_to_rgba(hex_color, opacity=100):
@@ -391,37 +392,6 @@ class ThemeEditorWindow(QMainWindow):
 
         self.presets_panel = PresetsPanel()
         left_panel.addTab(self.presets_panel, "Presets")
-
-        # --- NUEVA PESTAÑA DE SETTINGS ---
-        settings_tab = QWidget()
-        settings_layout = QVBoxLayout(settings_tab)
-        
-        thermal_group = QGroupBox("Thermal Limits")
-        thermal_form = QFormLayout()
-
-        # Input CPU
-        self.cpu_limit_edit = QLineEdit()
-        self.cpu_limit_edit.setPlaceholderText("75")
-        self.cpu_limit_edit.setValidator(QIntValidator(40, 110)) # Solo números entre 40 y 110
-        self.cpu_limit_edit.setText(str(settings.get_setting("cpu_temp_limit", 75)))
-        #self.cpu_limit_edit.textChanged.connect(self.save_thermal_settings)
-
-        # Input GPU
-        self.gpu_limit_edit = QLineEdit()
-        self.gpu_limit_edit.setPlaceholderText("80")
-        self.gpu_limit_edit.setValidator(QIntValidator(40, 110))
-        self.gpu_limit_edit.setText(str(settings.get_setting("gpu_temp_limit", 80)))
-        #self.gpu_limit_edit.textChanged.connect(self.save_thermal_settings)
-
-        thermal_form.addRow("CPU Limit (°C):", self.cpu_limit_edit)
-        thermal_form.addRow("GPU Limit (°C):", self.gpu_limit_edit)
-        thermal_group.setLayout(thermal_form)
-        
-        settings_layout.addWidget(thermal_group)
-        settings_layout.addStretch() # Empuja todo hacia arriba
-        
-        left_panel.addTab(settings_tab, "Settings")
-        # ---------------------------------
 
         splitter.addWidget(left_panel)
 
@@ -1479,6 +1449,7 @@ class ThemeEditorWindow(QMainWindow):
     def send_to_display(self):
         self.send_frame_with_sensors()
 
+    # funcion para enviar al display HID
     def send_frame_with_sensors(self):
         if not self.device:
             return
@@ -1763,27 +1734,49 @@ class ThemeEditorWindow(QMainWindow):
 
     def render_element_with_opacity(self, img, element):
         """Render an element with opacity support using alpha compositing."""
-        font = self.get_pil_font(element)
-        font_small = self.get_pil_font(element, int(element.font_size * 0.6))
+
+        # --- [BLOQUE TÉRMICO PARA HID] ---
+        # Guardamos el color original para no romper el diseño permanentemente
+        color_base_hex = element.color
+        
+        # Si la reacción térmica está activa, cambiamos el color del elemento 
+        # SOLO para este frame de la imagen HID
+        if getattr(element, 'thermal_enabled', False) and element.source != "static":
+            # Calculamos el color dinámico en una variable local
+            dynamic_qcolor = get_dynamic_color(element, QColor(color_base_hex), getattr(element, 'value', 0))
+            render_color_hex = dynamic_qcolor.name() # Este es el color temporal (verde/rojo)
+        else:
+            render_color_hex = color_base_hex
+
+        # 2. CREACIÓN DE UN ELEMENTO TEMPORAL (CLON)
+        # Esto es vital para que las sub-funciones de renderizado 
+        # no lean el color original del elemento real.
+        import copy
+        temp_element = copy.copy(element)
+        temp_element.color = render_color_hex # Le asignamos el color de renderizado al clon
+        # ---------------------------------
+
+        font = self.get_pil_font(temp_element)
+        font_small = self.get_pil_font(temp_element, int(temp_element.font_size * 0.6))
 
         # Get opacity values
-        color_opacity = getattr(element, 'color_opacity', 100)
-        bg_opacity = getattr(element, 'background_color_opacity', 100)
+        color_opacity = getattr(temp_element, 'color_opacity', 100)
+        bg_opacity = getattr(temp_element, 'background_color_opacity', 100)
 
-        if element.type == "circle_gauge":
-            self.render_circle_gauge_rgba(img, element, font, font_small, color_opacity, bg_opacity)
-        elif element.type == "bar_gauge":
-            self.render_bar_gauge_rgba(img, element, font, color_opacity, bg_opacity)
-        elif element.type == "text":
-            self.render_text_rgba(img, element, font, color_opacity)
-        elif element.type == "rectangle":
-            self.render_rectangle_rgba(img, element, color_opacity)
-        elif element.type == "clock":
+        if temp_element.type == "circle_gauge":
+            self.render_circle_gauge_rgba(img, temp_element, font, font_small, color_opacity, bg_opacity)
+        elif temp_element.type == "bar_gauge":
+            self.render_bar_gauge_rgba(img, temp_element, font, color_opacity, bg_opacity)
+        elif temp_element.type == "text":
+            self.render_text_rgba(img, temp_element, font, color_opacity)
+        elif temp_element.type == "rectangle":
+            self.render_rectangle_rgba(img, temp_element, color_opacity)
+        elif temp_element.type == "clock":
             # Build time format string based on element settings
-            time_format = getattr(element, 'time_format', '24h')
-            show_seconds = getattr(element, 'show_seconds', True)
-            show_am_pm = getattr(element, 'show_am_pm', True)
-            show_leading_zero = getattr(element, 'show_leading_zero', True)
+            time_format = getattr(temp_element, 'time_format', '24h')
+            show_seconds = getattr(temp_element, 'show_seconds', True)
+            show_am_pm = getattr(temp_element, 'show_am_pm', True)
+            show_leading_zero = getattr(temp_element, 'show_leading_zero', True)
 
             if time_format == '12h':
                 fmt = "%I:%M:%S" if show_seconds else "%I:%M"
@@ -1798,44 +1791,44 @@ class ThemeEditorWindow(QMainWindow):
             if not show_leading_zero and current_time[0] == '0':
                 current_time = current_time[1:]
             temp_element = ThemeElement(
-                text=current_time, x=element.x, y=element.y,
-                font_family=element.font_family, font_size=element.font_size,
-                font_bold=element.font_bold, font_italic=element.font_italic,
-                text_align=element.text_align, color=element.color,
+                text=current_time, x=temp_element.x, y=temp_element.y,
+                font_family=temp_element.font_family, font_size=temp_element.font_size,
+                font_bold=temp_element.font_bold, font_italic=temp_element.font_italic,
+                text_align=temp_element.text_align, color=temp_element.color,
                 color_opacity=color_opacity,
-                width=element.width, height=element.height, clip=element.clip
+                width=temp_element.width, height=temp_element.height, clip=temp_element.clip
             )
             self.render_text_rgba(img, temp_element, font, color_opacity)
-        elif element.type == "analog_clock":
-            self.render_analog_clock_rgba(img, element, color_opacity, bg_opacity)
-        elif element.type == "image":
-            if element.image_path:
+        elif temp_element.type == "analog_clock":
+            self.render_analog_clock_rgba(img, temp_element, color_opacity, bg_opacity)
+        elif temp_element.type == "image":
+            if temp_element.image_path:
                 # Validate image path is safe
-                safe, resolved_path, err = is_safe_path(element.image_path, allow_absolute=True)
-                if not safe or not os.path.exists(element.image_path):
+                safe, resolved_path, err = is_safe_path(temp_element.image_path, allow_absolute=True)
+                if not safe or not os.path.exists(temp_element.image_path):
                     if not safe:
-                        print(f"Unsafe image path blocked: {element.image_path} - {err}")
+                        print(f"Unsafe image path blocked: {temp_element.image_path} - {err}")
                     return
                 try:
-                    overlay = Image.open(element.image_path).convert('RGBA')
-                    if element.scale_proportionally:
-                        overlay.thumbnail((element.width, element.height), Image.Resampling.LANCZOS)
+                    overlay = Image.open(temp_element.image_path).convert('RGBA')
+                    if temp_element.scale_proportionally:
+                        overlay.thumbnail((temp_element.width, temp_element.height), Image.Resampling.LANCZOS)
                     else:
-                        overlay = overlay.resize((element.width, element.height), Image.Resampling.LANCZOS)
+                        overlay = overlay.resize((temp_element.width, temp_element.height), Image.Resampling.LANCZOS)
                     # Apply opacity to image
                     if color_opacity < 100:
                         alpha = overlay.split()[3]
                         alpha = alpha.point(lambda x: int(x * color_opacity / 100))
                         overlay.putalpha(alpha)
-                    img.paste(overlay, (element.x, element.y), overlay)
+                    img.paste(overlay, (temp_element.x, temp_element.y), overlay)
                 except Exception as e:
                     print(f"Image load error: {e}")
         else:
-            custom = get_custom_element(element.type)
+            custom = get_custom_element(temp_element.type)
             if custom and custom.get('render_image'):
                 try:
                     draw = ImageDraw.Draw(img)
-                    custom['render_image'](draw, img, element)
+                    custom['render_image'](draw, img, temp_element)
                 except Exception as e:
                     print(f"Custom element render error: {e}")
 
@@ -3267,3 +3260,46 @@ class ThemeEditorWindow(QMainWindow):
 
         self.cleanup()
         event.accept()
+
+    # --- Thermal Reaction Function ---
+    def update_thermal_reaction(self, current_sensor_value):
+        # 1. Salir rápido si no está habilitado para ahorrar CPU
+        if not self.thermal_enabled:
+            return False 
+            
+        # 2. Determinar la propiedad objetivo dinámicamente según el tipo de elemento
+        propiedad_objetivo = "color" # Propiedad por defecto
+        
+        if self.type == "text":
+            propiedad_objetivo = "text_color"
+        elif self.type in ["gauge", "bar"]:
+            propiedad_objetivo = "color" # Asumiendo que las barras y gauges usan 'color'
+        elif self.type in ["shape", "background"]:
+            propiedad_objetivo = "background_color"
+        # Puedes agregar más tipos aquí según lo necesites
+
+        # 3. Cachear el color original en tiempo de ejecución (solo se ejecuta una vez)
+        # Usamos un guion bajo para indicar que es una variable interna y no se guardará en to_dict()
+        atributo_original = f"_original_{propiedad_objetivo}"
+        if not hasattr(self, atributo_original):
+            # Guardamos el estado del color ANTES de que el motor térmico lo toque
+            setattr(self, atributo_original, getattr(self, propiedad_objetivo))
+            
+        # 4. Evaluar la temperatura
+        color_base = getattr(self, atributo_original)
+        nuevo_color = color_base # Asumimos que todo está fresco y normal por defecto
+        
+        if current_sensor_value >= self.thermal_crit_value:
+            nuevo_color = self.thermal_crit_color
+        elif current_sensor_value >= self.thermal_warn_value:
+            nuevo_color = self.thermal_warn_color
+            
+        # 5. Aplicar el color y avisar si hubo cambios
+        color_actual = getattr(self, propiedad_objetivo)
+        
+        if color_actual != nuevo_color:
+            # setattr aplica el valor a self.text_color, self.color, etc., según corresponda
+            setattr(self, propiedad_objetivo, nuevo_color)
+            return True # Retorna True indicando que este elemento cambió y la UI debe repintarlo
+            
+        return False # Retorna False si la temperatura no requirió un cambio de color

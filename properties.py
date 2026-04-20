@@ -582,6 +582,37 @@ class FontPreviewDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return QSize(200, 24)
 
+class SensorSelectionDialog(QDialog):
+    def __init__(self, model, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Seleccionar Sensor")
+        self.resize(300, 400)
+        
+        layout = QVBoxLayout(self)
+        
+        self.tree = QTreeView()
+        self.tree.setModel(model)
+        self.tree.setHeaderHidden(True)
+        self.tree.expandAll() 
+        layout.addWidget(self.tree)
+        
+        self.btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.btn_box.accepted.connect(self.accept)
+        self.btn_box.rejected.connect(self.reject)
+        layout.addWidget(self.btn_box)
+        
+    def get_selected_sensor(self):
+        index = self.tree.currentIndex()
+        if not index.isValid():
+            return None, None
+            
+        source_id = index.data(Qt.ItemDataRole.UserRole)
+        display_name = index.data(Qt.ItemDataRole.DisplayRole)
+        
+        if not source_id: 
+            return None, None
+            
+        return source_id, display_name
 
 class PropertiesPanel(QWidget):
     property_changed = Signal()
@@ -707,6 +738,12 @@ class PropertiesPanel(QWidget):
         title = QLabel("Properties")
         title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px;")
         layout.addWidget(title)
+
+        # 1. Creamos el modelo de sensores como una variable de clase (con self.)
+        self.sensor_model = QStandardItemModel()
+        
+        # 2. Llamamos a una función que lo llene de datos (vamos a crearla ahora)
+        self.populate_sensor_model()
 
         # Helper text when no element selected (in a container for proper centering)
         self.no_selection_container = QWidget()
@@ -1137,13 +1174,28 @@ class PropertiesPanel(QWidget):
         self.section_headers['data'] = data_frame
         self.props_layout.addWidget(data_frame)
 
-        self.source_combo = NoScrollComboBox()
-        self.source_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.source_combo.setMinimumWidth(50)
-        self.setup_source_combo()
-        self.source_combo.currentIndexChanged.connect(self.on_source_changed)
+        # --- NUEVO SISTEMA DE SENSOR (Reemplaza al ComboBox) ---
+        self.source_widget = QWidget()
+        self.source_layout = QHBoxLayout(self.source_widget)
+        self.source_layout.setContentsMargins(0, 0, 0, 0)
+        self.source_layout.setSpacing(5)
+
+        self.source_display = QLineEdit()
+        self.source_display.setReadOnly(True)
+        self.source_display.setPlaceholderText("Selecciona un sensor...")
+        self.source_display.setStyleSheet("background-color: transparent; border: 1px solid #555;")
+        
+        self.btn_change_source = QPushButton("Cambiar")
+        self.btn_change_source.setFixedWidth(70)
+        self.btn_change_source.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_change_source.clicked.connect(self.open_sensor_dialog)
+
+        self.source_layout.addWidget(self.source_display)
+        self.source_layout.addWidget(self.btn_change_source)
+
         self.source_label = self.create_label("Source:")
-        data_layout.addRow(self.source_label, self.source_combo)
+        data_layout.addRow(self.source_label, self.source_widget)
+        # ------------------------------------------------------
 
         self.value_spin = NoScrollDoubleSpinBox()
         self.value_spin.setRange(0, 100)
@@ -1197,7 +1249,7 @@ class PropertiesPanel(QWidget):
         data_layout.addRow(self.thermal_crit_color_label, self.thermal_crit_color)
 
         self.section_fields['data'] = [
-            (self.source_label, self.source_combo),
+            (self.source_label, self.source_widget),
             (self.value_label, self.value_spin),
             (self.thermal_label),
             (self.thermal_checkbox_label, self.thermal_checkBox),
@@ -1623,24 +1675,11 @@ class PropertiesPanel(QWidget):
                 self.font_family_combo.addItem(family)
                 self.label_font_family_combo.addItem(family)
 
-    def setup_source_combo(self):
-        """Setup the source combo box with categorized items."""
+    def populate_sensor_model(self):
+        """Configura el modelo de datos con categorías, carpetas e iconos."""
+        
         dynamic_sources = get_data_sources_categorized()
-        self.source_combo.clear()
-
-        # 2. Transformamos el ComboBox plano en un Árbol Desplegable
-        tree_view = QTreeView()
-        # Ajustar las columnas al contenido para que no se corten los nombres
-        tree_view.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-
-        # Hacer que la ventana desplegable sea tan ancha como el árbol necesite
-        self.source_combo.view().setMinimumWidth(500) # Puedes subir este número (ej: 350 o 400)
-        tree_view.setHeaderHidden(True)      # Ocultar la cabecera de las columnas
-        tree_view.setIndentation(15)         # Sangría para los sub-menús
-        self.source_combo.setView(tree_view) # ¡Inyectamos el árbol en el ComboBox!
-
-        # 3. Creamos la estructura de datos
-        model = QStandardItemModel()
+        self.sensor_model.clear()
 
         CATEGORY_ICONS = {
             "CPU": "💻",
@@ -1652,99 +1691,53 @@ class PropertiesPanel(QWidget):
         }
 
         for category, items in dynamic_sources.items():
-            # 1. Creamos el título de la categoría principal (ej: 🌪️ System Fans)
+            # 1. Creamos la categoría principal (Carpeta Madre)
             icon = CATEGORY_ICONS.get(category, "📁")
             parent_item = QStandardItem(f"{icon} {category}")
-            parent_item.setSelectable(False)
+            parent_item.setSelectable(False) # No se puede elegir la carpeta, solo lo de adentro
             
-            # Ponemos el título en negrita para que resalte
+            # Título en negrita
             font = parent_item.font()
             font.setBold(True)
             parent_item.setFont(font)
 
-            # 2. Solo mantenemos el grupo de Clocks (porque esos sí son muchos)
+            # 2. Creamos una sub-carpeta especial solo para los Clocks (Relojes)
             clocks_group = QStandardItem("⏱️ Relojes (Frecuencias)")
             clocks_group.setSelectable(False)
 
             for source_id, display_name, _, _ in items:
-                # Personalización de iconos individuales
+                # Lógica de iconos según el nombre del sensor
                 sensor_icon = "📍" 
                 if "Temp" in display_name: sensor_icon = "🔥"
                 elif "Usage" in display_name or "%" in display_name: sensor_icon = "📈"
                 elif "Power" in display_name or "W" in display_name: sensor_icon = "⚡"
-                elif "Fan" in display_name or "Pump" in display_name: sensor_icon = "🌀" # Icono para ventilador
+                elif "Fan" in display_name or "Pump" in display_name: sensor_icon = "🌀"
                 
+                # Creamos el sensor individual
                 item = QStandardItem(f"{sensor_icon} {display_name}")
-                item.setData(source_id, Qt.ItemDataRole.UserRole)
+                item.setData(source_id, Qt.ItemDataRole.UserRole) # Guardamos el ID secreto
 
-                # --- LÓGICA DE CLASIFICACIÓN MODIFICADA ---
+                # Si es un reloj, lo metemos en su sub-carpeta
                 if "Clock:" in display_name:
-                    # Los relojes siguen yendo a su sub-carpeta
                     clocks_group.appendRow(item)
                 else:
-                    # TODO LO DEMÁS (Ventiladores, Temperaturas, Watts) va directo a la raíz de la categoría
-                    # Esto elimina la carpeta intermedia de "Ventiladores"
+                    # Todo lo demás va directo a la categoría principal
                     parent_item.appendRow(item)
 
-            # Añadimos la sub-carpeta de relojes solo si tiene algo
+            # Si la sub-carpeta de relojes tiene algo, la añadimos a la categoría
             if clocks_group.rowCount() > 0:
                 parent_item.appendRow(clocks_group)
 
-            model.appendRow(parent_item)
-
-        # 4. Le aplicamos el modelo terminado a nuestro ComboBox
-        self.source_combo.setModel(model)
-        
+            # Añadimos la categoría completa al modelo principal
+            self.sensor_model.appendRow(parent_item)
 
     def get_selected_source(self):
-        """Get the currently selected source ID."""
-        idx = self.source_combo.currentIndex()
-        source_id = self.source_combo.itemData(idx, Qt.ItemDataRole.UserRole)
-        return source_id if source_id else "static"
+        """Retorna el ID del sensor guardado en el elemento seleccionado."""
+        if not self.current_element:
+            return "static"
+        # Preguntamos directamente al objeto, no a la interfaz
+        return getattr(self.current_element, 'source', 'static')
 
-    def set_source_by_id(self, source_id):
-        """Set the combo box selection by source ID."""
-        for i in range(self.source_combo.count()):
-            if self.source_combo.itemData(i, Qt.ItemDataRole.UserRole) == source_id:
-                self.source_combo.setCurrentIndex(i)
-                return
-                
-        # Fallback to static if not found (con freno de emergencia para evitar RecursionError)
-        if source_id != "static":
-            self.set_source_by_id("static")
-        else:
-            # Si llegó aquí, es que ni siquiera "static" está en el menú.
-            # Lo dejamos en el primer elemento disponible (índice 0) por seguridad.
-            if self.source_combo.count() > 0:
-                self.source_combo.setCurrentIndex(0)
-
-    def on_source_changed(self, index=None):
-        """Handle source combo box selection change with TreeView support."""
-        # 1. Leemos la selección directamente desde la vista del árbol interno
-        tree_index = self.source_combo.view().currentIndex()
-        
-        # 2. Extraemos el ID oculto de la rama exacta que se tocó
-        source_id = tree_index.data(Qt.ItemDataRole.UserRole)
-        
-        # 3. Si el usuario hace clic en una "Carpeta" (que no tiene ID), simplemente ignoramos
-        if not source_id:
-            return
-
-        # Update preview value visibility based on whether source is static
-        is_static = source_id == "static"
-        self.value_label.setVisible(is_static and self.value_label.parent().isVisible())
-        self.value_spin.setVisible(is_static and self.value_spin.parent().isVisible())
-
-        if self.current_element:
-            if self.current_element.locked:
-                return
-            if not self._undo_state_saved:
-                self.property_will_change.emit()
-                self._undo_state_saved = True
-            
-            # Asignamos el ID real (ej: cpu_clock_0) al elemento
-            self.current_element.source = source_id
-            self.property_changed.emit()
 
     def set_alignment(self, align):
         self.align_left_btn.blockSignals(True)
@@ -1973,7 +1966,7 @@ class PropertiesPanel(QWidget):
         show_preview_value = value_visible and is_static
 
         self.source_label.setVisible(source_visible)
-        self.source_combo.setVisible(source_visible)
+        self.source_widget.setVisible(source_visible)
         self.value_label.setVisible(show_preview_value)
         self.value_spin.setVisible(show_preview_value)
 
@@ -2074,6 +2067,7 @@ class PropertiesPanel(QWidget):
                                       show_leading_zero_visible or show_seconds_hand_visible or
                                       show_clock_border_visible or clock_face_style_visible or
                                       smooth_animation_visible)
+        
 
         # Update section header visibility
         for section, header in self.section_headers.items():
@@ -2123,7 +2117,7 @@ class PropertiesPanel(QWidget):
         self.align_center_btn.blockSignals(True)
         self.align_right_btn.blockSignals(True)
         self.clip_checkbox.blockSignals(True)
-        self.source_combo.blockSignals(True)
+        self.source_widget.blockSignals(True)
         self.value_spin.blockSignals(True)
         self.image_path_edit.blockSignals(True)
         self.scale_proportionally_check.blockSignals(True)
@@ -2269,7 +2263,8 @@ class PropertiesPanel(QWidget):
         label_text_color = getattr(element, 'label_text_color', element.color)
         self.label_text_color_btn.setStyleSheet(f"background-color: {label_text_color};")
 
-        self.set_source_by_id(element.source)
+        #self.set_source_by_id(element.source)
+        self.refresh_source_display()
 
         # Thermal Reaction Values
         self.thermal_checkBox.setChecked(element.thermal_enabled)
@@ -2283,6 +2278,9 @@ class PropertiesPanel(QWidget):
         self.thermal_crit_color.setStyleSheet(
             f"background-color: {element.thermal_crit_color}; border: 1px solid #555;"
         )
+
+        # LLAMADA CRÍTICA: Sincroniza el ComboBox con el sensor del objeto
+        self.refresh_source_display()
 
         self.name_edit.blockSignals(False)
         self.x_spin.blockSignals(False)
@@ -2304,7 +2302,7 @@ class PropertiesPanel(QWidget):
         self.align_center_btn.blockSignals(False)
         self.align_right_btn.blockSignals(False)
         self.clip_checkbox.blockSignals(False)
-        self.source_combo.blockSignals(False)
+        self.source_widget.blockSignals(False)
         self.value_spin.blockSignals(False)
         self.image_path_edit.blockSignals(False)
         self.scale_proportionally_check.blockSignals(False)
@@ -2352,9 +2350,51 @@ class PropertiesPanel(QWidget):
 
         # Enable/disable controls based on locked state
         self.set_controls_enabled(not element.locked)
-        
+
         self._updating = False
 
+    def open_sensor_dialog(self):
+        """Abre la ventana para elegir el sensor y lo guarda."""
+        if not self.current_element: return
+            
+        # Creamos la ventanita usando nuestro modelo organizado
+        dialog = SensorSelectionDialog(self.sensor_model, self)
+        
+        if dialog.exec():
+            source_id, display_name = dialog.get_selected_sensor()
+            if source_id:
+                self.current_element.source = source_id
+                self.source_display.setText(display_name)
+                self.property_changed.emit()
+
+    def refresh_source_display(self):
+        """Actualiza el texto del cuadro cuando tocas un elemento en el lienzo."""
+        if not getattr(self, 'current_element', None):
+            return
+            
+        target_source = getattr(self.current_element, 'source', 'static')
+        
+        if target_source == 'static':
+            self.source_display.setText("General")
+            return
+            
+        model = self.source_widget.model() # Mismo caso, asegúrate de que este es tu modelo
+        
+        def buscar_nombre(parent_idx):
+            for row in range(model.rowCount(parent_idx)):
+                idx = model.index(row, 0, parent_idx)
+                if idx.data(Qt.ItemDataRole.UserRole) == target_source:
+                    return idx.data(Qt.ItemDataRole.DisplayRole)
+                hijo = buscar_nombre(idx)
+                if hijo: return hijo
+            return None
+            
+        nombre_encontrado = buscar_nombre(QModelIndex())
+        
+        if nombre_encontrado:
+            self.source_display.setText(nombre_encontrado)
+        else:
+            self.source_display.setText("Desconocido")
 
     def set_controls_enabled(self, enabled):
         """Enable or disable all property controls."""
@@ -2391,7 +2431,7 @@ class PropertiesPanel(QWidget):
         self.clip_checkbox.setEnabled(enabled)
 
         # Source and value
-        self.source_combo.setEnabled(enabled)
+        self.source_widget.setEnabled(enabled)
         self.value_spin.setEnabled(enabled)
 
         # Thermal Reaction
@@ -2443,7 +2483,7 @@ class PropertiesPanel(QWidget):
         self.clock_face_style_combo.setEnabled(enabled)
         self.smooth_animation_check.setEnabled(enabled)
 
-    def on_property_changed(self):
+    def on_property_changed(self, *args, **kwargs):
         if self._updating or not self.current_element:
             return
 
@@ -2561,7 +2601,7 @@ class PropertiesPanel(QWidget):
         self._last_width = self.width_spin.value()
         self._last_height = self.height_spin.value()
 
-        # Thermal Reaction
+        # Thermal Reaction --- GUARDADO THERMAL REACTION ---
         self.current_element.thermal_enabled = self.thermal_checkBox.isChecked()
         self.current_element.thermal_warn_value = self.thermal_warn_spin.value()
         self.current_element.thermal_crit_value = self.thermal_crit_spin.value()

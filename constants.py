@@ -23,44 +23,7 @@ def register_custom_element_types(custom_types):
     global ELEMENT_TYPES
     ELEMENT_TYPES = _BASE_ELEMENT_TYPES + list(custom_types)
 
-# Categorías y variables unificadas (Los IDs deben ser iguales a sensors.py)
-# DATA_SOURCES_CATEGORIZED = {
-#     "General": [
-#         ("static", "Static Text (None)", "static", ""),
-#     ],
-#     # ----------------------------------------------
-#     "CPU": [
-#         ("cpu_usage", "CPU Usage", "percent", "%"),
-#         ("cpu_temp", "CPU Temp", "temp", "°C"),
-#         ("cpu_power", "CPU Power", "power", " W"),
-#         ("cpu_clock", "CPU Clock", "clock", " MHz"),
-#         ("cpu_fan", "CPU Fan", "speed", " RPM"),
-#         ("aio_pump", "AIO Pump", "speed", " RPM"),
-#     ],
-#     # ----------------------------------------------
-#     "GPU": [
-#         ("cpu_usage", "GPU Usage", "percent", "%"),
-#         ("gpu_temp", "GPU Temp", "temp", "°C"),
-#         ("gpu_clock", "GPU Clock", "clock", " MHz"),
-#         ("gpu_power", "GPU Power", "power", " W"),
-#         ("gpu_fan", "GPU Fan", "speed", " RPM"),
-#     ],
-#     # ----------------------------------------------
-#     "Memory": [
-#         ("ram_usage", "RAM Usage", "percent", "%"),
-#         ("ram_used", "RAM Used", "size", " GB"),
-#         ("ram_available", "RAM Available", "size", " GB"),
-#     ],
-#     # ----------------------------------------------
-#     "Network": [
-#         ("net_upload", "Upload Speed", "net_speed", " MB/s"),
-#         ("net_download", "Download Speed", "net_speed", " MB/s"),
-#     ],
-#     # ----------------------------------------------
-#     "System Fans": [
-#         (f"sys_fan_{i}", f"Sys Fan {i}", "speed", " RPM") for i in range(1, 7)
-#     ]
-# }
+
 
 def get_data_sources_categorized():
     """
@@ -128,17 +91,6 @@ def get_data_sources_categorized():
 
     return sources
 
-
-
-# Lookup for source units (Usado por main_window.py para dibujar)
-# SOURCE_UNITS = {}
-# for category, sources in DATA_SOURCES_CATEGORIZED.items():
-#     for source_id, name, unit_type, unit_symbol in sources:
-#         SOURCE_UNITS[source_id] = {
-#             "name": name,
-#             "type": unit_type,
-#             "symbol": unit_symbol
-#         }
 
 # ==========================================
 # SOURCE UNITS (Diccionario Inteligente)

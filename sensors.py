@@ -7,13 +7,19 @@ import os
 import threading
 import time
 import clr
+import subprocess
 
 # Carga de DLL de Libre Hardware Monitor
-try:
-    clr.AddReference(r"dll\LibreHardwareMonitorLib")
+# Obtén la ruta absoluta a la carpeta donde está tu DLL
+dll_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'dll', 'LibreHardwareMonitorLib.dll'))
+
+if os.path.exists(dll_path):
+    # Cargar la DLL físicamente
+    clr.AddReference(dll_path)
+    # AHORA sí puedes importar el espacio de nombres
     from LibreHardwareMonitor.Hardware import Computer
-except Exception as e:
-    print(f"[Sensors] Error cargando DLL: {e}")
+else:
+    print(f"Error: No se encontró la DLL en {dll_path}")
 
 _latest_sensor_data = {
     # --- CPU
@@ -175,6 +181,71 @@ def stop_sensors():
         _pc_instance.Close()
         _pc_instance = None
 
+# FUNCION PARA INCORPORAR PAWNIO INDISPENSABLE PARA la libreria de libre hardware monitor
+def check_and_install_pawnio():
+    """
+    Verifica si PawnIO está instalado y en ejecución.
+    Si está detenido, intenta iniciarlo.
+    Si no existe, pregunta e instala usando Winget.
+    """
+    print("[Thermal Engine] Verificando dependencias del sistema...")
+    
+    # 1. Comprobar si el servicio PawnIO existe y cuál es su estado
+    try:
+        # text=True nos permite leer la respuesta de Windows como un string normal
+        output = subprocess.check_output("sc query PawnIO", shell=True, stderr=subprocess.STDOUT, text=True)
+        
+        # Validamos si realmente está corriendo en el núcleo
+        if "RUNNING" in output:
+            print("[Thermal Engine] ✅ Driver PawnIO detectado y ejecutándose en el kernel.")
+            return True
+        else:
+            print("[Thermal Engine] ⚠️ Driver PawnIO está instalado pero DETENIDO. Intentando iniciar...")
+            # Intentar iniciarlo (Requiere permisos de Administrador)
+            try:
+                subprocess.check_call("sc start PawnIO", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print("[Thermal Engine] ✅ Driver PawnIO encendido con éxito.")
+                return True
+            except subprocess.CalledProcessError:
+                print("[Thermal Engine] ❌ ERROR: PawnIO está instalado pero Windows bloqueó su inicio.")
+                print(" -> SOLUCIÓN: ¡Debes ejecutar tu editor (o el .exe) como ADMINISTRADOR!")
+                return False
+                
+    except subprocess.CalledProcessError:
+        # Si sc query lanza error, significa que el servicio no existe en absoluto
+        print("[Thermal Engine] ⚠️ Driver PawnIO NO detectado en el sistema.")
+    
+    # 2. Si no existe, lanzamos la pregunta al usuario
+    respuesta = input("\n[Atención] Thermal Engine necesita instalar 'PawnIO' para leer los sensores de tu procesador Ryzen.\n¿Deseas instalarlo ahora? (S/N): ").strip().lower()
+    
+    if respuesta != 's':
+        print("[Thermal Engine] ❌ Instalación cancelada. Los sensores de CPU no funcionarán.")
+        return False
+        
+    # 3. Ejecutar Winget silenciosamente
+    print("\n[Thermal Engine] Descargando e instalando PawnIO vía Winget...")
+    print("Por favor, acepta la ventana de permisos de Administrador si aparece...")
+    
+    try:
+        comando_winget = 'winget install namazso.PawnIO --accept-package-agreements --accept-source-agreements'
+        resultado = subprocess.run(comando_winget, shell=True, capture_output=True, text=True)
+        
+        if resultado.returncode == 0:
+            print("[Thermal Engine] ✅ ¡PawnIO instalado con éxito!")
+            # Obligamos a iniciar el servicio recién instalado
+            try:
+                subprocess.run("sc start PawnIO", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                print("[Thermal Engine] ✅ Servicio activado correctamente.")
+            except subprocess.CalledProcessError:
+                print("[Thermal Engine] ⚠️ Se instaló, pero necesitas reiniciar la app como Administrador para activarlo.")
+            return True
+        else:
+            print(f"[Thermal Engine] ❌ Error en la instalación. Detalle: {resultado.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"[Thermal Engine] ❌ Error crítico al ejecutar Winget: {e}")
+        return False
 
 # --- NUEVA FUNCIÓN DE DEBUG ---
 def debug_print_sensors():
@@ -258,9 +329,9 @@ if __name__ == "__main__":
     time.sleep(_time_loop) 
     
     try:
-        while True:
-            debug_print_sensors()
-            time.sleep(_time_loop)
+        # while True:
+        debug_print_sensors()
+            # time.sleep(_time_loop)
     except KeyboardInterrupt:
         print("\n[Test] Prueba cancelada por el usuario.")
         stop_sensors()

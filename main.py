@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QFont
 from PySide6.QtCore import Qt
 
-from sensors import init_sensors, stop_sensors, SensorManager
+from sensors import init_sensors, stop_sensors, SensorManager, check_and_install_pawnio
+from rgb_manager import RGBManager
+rgb_engine = RGBManager()
 from main_window import ThemeEditorWindow
 from app_path import get_app_dir
 import settings
@@ -49,6 +51,15 @@ def create_tray_icon():
 
 
 def main():
+    # Primero aseguramos las dependencias
+    dependencias_ok = check_and_install_pawnio()
+    
+    # Luego arrancamos el motor
+    if dependencias_ok:
+        # Aquí llamas a tu función init_sensors() y el resto de tu código
+        print("Iniciando lecturas de hardware...")
+        # init_sensors()
+
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Thermal Engine')
     parser.add_argument('--minimized', action='store_true', help='Start minimized to system tray')
