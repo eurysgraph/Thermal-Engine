@@ -21,8 +21,7 @@ from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter, QBrush, QFont
 from PySide6.QtCore import Qt
 
 from sensors import init_sensors, stop_sensors, SensorManager, check_and_install_pawnio
-from rgb_manager import RGBManager
-rgb_engine = RGBManager()
+
 from main_window import ThemeEditorWindow
 from app_path import get_app_dir
 import settings

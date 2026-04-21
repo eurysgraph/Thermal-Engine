@@ -12,6 +12,7 @@ class ThemeElement:
         self.height = kwargs.get("height", 50)
         self.radius = kwargs.get("radius", 100)
         self.border_radius = kwargs.get("border_radius", 0)
+        self.rotation = kwargs.get("rotation", 0) # nueva propiedad de rotacion
         self.glass_effect = kwargs.get("glass_effect", False)
         self.glass_blur = kwargs.get("glass_blur", 10)
         self.glass_opacity = kwargs.get("glass_opacity", 50)

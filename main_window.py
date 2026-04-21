@@ -24,7 +24,33 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QByteArray, Signal, QObject
 from PySide6.QtGui import QColor, QAction, QKeySequence, QIcon, QTextCursor, QFont, QIntValidator
-from canvas import get_dynamic_color
+
+from PIL import Image, ImageDraw, ImageFont, ImageChops
+from security import validate_preset_schema, is_safe_path
+
+try:
+    import hid # O la librería que estés usando para la conexión USB
+    HAS_HID = True
+except ImportError:
+    HAS_HID = False
+    print("[Error] Librería 'hid' no encontrada. Las funciones USB estarán deshabilitadas.")
+
+import settings
+from app_path import get_resource_path, get_bundled_resource_path
+from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, SOURCE_UNITS
+from sensors import get_cached_sensors, stop_sensors # <-- IMPORTANTE
+from element import ThemeElement 
+
+from canvas import CanvasPreview, get_dynamic_color
+from properties import PropertiesPanel
+from element_list import ElementListPanel
+from presets import PresetsPanel
+from elements import get_custom_element
+from video_background import video_background, HAS_CV2
+
+# Importamos la instancia global de tu RGB manager
+from rgb_manager import rgb_engine
+from rgb import RGBControlPanel
 
 
 class ConsoleOutputStream(QObject):
@@ -110,10 +136,6 @@ PBT_APMRESUMEAUTOMATIC = 0x0012
 PBT_APMRESUMESUSPEND = 0x0007
 PBT_APMSUSPEND = 0x0004
 
-from PIL import Image, ImageDraw, ImageFont, ImageChops
-
-from security import validate_preset_schema, is_safe_path
-
 
 # Global font cache for PIL fonts (shared across instances)
 _pil_font_cache = {}
@@ -127,20 +149,6 @@ _gradient_cache_max_size = 20  # Reduced from 50 to save memory
 _cpu_percent_history = []
 _last_net_io = None
 _last_net_time = 0
-
-
-try:
-    import hid # O la librería que estés usando para la conexión USB
-    HAS_HID = True
-except ImportError:
-    HAS_HID = False
-    print("[Error] Librería 'hid' no encontrada. Las funciones USB estarán deshabilitadas.")
-
-import sensors
-import settings
-from app_path import get_resource_path, get_bundled_resource_path
-from constants import DISPLAY_WIDTH, DISPLAY_HEIGHT, SOURCE_UNITS
-from sensors import get_cached_sensors, stop_sensors # <-- IMPORTANTE
 
 
 def get_value_with_unit(value, source, temp_hide_unit=False):
@@ -166,7 +174,6 @@ def get_value_with_unit(value, source, temp_hide_unit=False):
         return f"{value:.1f}{symbol}"
     else:  # percent
         return f"{value:.0f}{symbol}"
-from element import ThemeElement
 
 
 def hex_to_rgba(hex_color, opacity=100):
@@ -178,12 +185,7 @@ def hex_to_rgba(hex_color, opacity=100):
     b = int(hex_color[4:6], 16)
     a = int(255 * opacity / 100)
     return (r, g, b, a)
-from canvas import CanvasPreview
-from properties import PropertiesPanel
-from element_list import ElementListPanel
-from presets import PresetsPanel
-from elements import get_custom_element
-from video_background import video_background, HAS_CV2
+
 
 class ThemeEditorWindow(QMainWindow):
     def __init__(self):
@@ -392,6 +394,10 @@ class ThemeEditorWindow(QMainWindow):
 
         self.presets_panel = PresetsPanel()
         left_panel.addTab(self.presets_panel, "Presets")
+
+        # nuevo panel para controlar las RGB
+        self.rgb_panel = RGBControlPanel()
+        left_panel.addTab(self.rgb_panel, "RGB Config")
 
         splitter.addWidget(left_panel)
 
@@ -1508,6 +1514,16 @@ class ThemeEditorWindow(QMainWindow):
                 self._canvas_update_counter = 0
                 self.canvas.set_elements(self.elements)
                 self.canvas.update()
+            
+            # RGB Manger
+            if rgb_engine.active:
+                current_temps = {
+                    'cpu': sensor_data['cpu_temp'],
+                    'gpu': sensor_data['gpu_temp']  
+                }
+                
+                # Alimentamos la capa térmica superior
+                rgb_engine.evaluate_thermal_state(current_temps)
 
             self.record_frame_time()
 

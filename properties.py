@@ -1738,7 +1738,6 @@ class PropertiesPanel(QWidget):
         # Preguntamos directamente al objeto, no a la interfaz
         return getattr(self.current_element, 'source', 'static')
 
-
     def set_alignment(self, align):
         self.align_left_btn.blockSignals(True)
         self.align_center_btn.blockSignals(True)
@@ -1783,7 +1782,7 @@ class PropertiesPanel(QWidget):
                 "width": True, "height": True, "radius": False,
                 "color": True, "bg_color": False, "text": False,
                 "font": False, "font_size": False, "font_style": False,
-                "align": False, "clip": False, "source": False, "value": False, "image": False,
+                "align": False, "clip": False, "source": True, "value": False, "image": False,
                 "border_radius": True, "glass_effect": True
             },
             "image": {

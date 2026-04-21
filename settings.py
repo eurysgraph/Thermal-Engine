@@ -28,8 +28,6 @@ DEFAULT_SETTINGS = {
     "default_preset": None,  # Name of preset to load on startup
     "overdrive_mode": False,
     "suppress_60fps_warning": False,  # Show warning when selecting 60 FPS
-    "cpu_temp_limit": 75,
-    "gpu_temp_limit": 80,
 }
 
 _settings = None

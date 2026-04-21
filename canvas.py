@@ -192,6 +192,7 @@ class CanvasPreview(QWidget):
             int(DISPLAY_WIDTH * self.scale),
             int(DISPLAY_HEIGHT * self.scale)
         )
+        
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Enable keyboard input
 
