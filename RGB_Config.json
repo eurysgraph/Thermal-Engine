@@ -1,18 +1,28 @@
 {
     "mode": "rain",
     "speed": 3,
+    "device_dividers": {
+        "ASUS Aura DRAM": 3,
+        "Corsair Vengeance RGB": 3,
+        "Corsair Vengeance Pro RGB": 2
+    },
+    "device_reverse": [
+        "Corsair Vengeance",
+        "DRAM"
+    ],
     "colors": [
         [
-            255,
-            102,
+            170,
+            85,
             0
         ],
         [
-            1,
+            0,
             255,
-            192
+            123
         ]
     ],
+    "rainbow_submode": "wave",
     "thermal_overlay": {
         "enabled": true,
         "cpu": {
@@ -20,8 +30,8 @@
             "crit": 80,
             "color_warn": [
                 255,
-                165,
-                0
+                255,
+                255
             ],
             "color_crit": [
                 255,
@@ -30,15 +40,17 @@
             ],
             "devices": [
                 "ASUS TUF GAMING X570-PLUS (WI-FI)"
-            ]
+            ],
+            "crit_mode": "strobe",
+            "warn_mode": "breathing"
         },
         "gpu": {
             "warn": 60,
             "crit": 75,
             "color_warn": [
                 255,
-                165,
-                0
+                255,
+                255
             ],
             "color_crit": [
                 255,
@@ -47,11 +59,10 @@
             ],
             "devices": [
                 "Corsair Vengeance Pro RGB",
-                "Corsair Vengeance Pro RGB",
-                "Corsair Vengeance Pro RGB",
-                "Corsair Vengeance Pro RGB",
                 "ASUS TUF GeForce RTX 3090 Gaming OC"
-            ]
+            ],
+            "crit_mode": "strobe",
+            "warn_mode": "breathing"
         }
     }
 }
